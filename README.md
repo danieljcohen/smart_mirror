@@ -2,6 +2,6 @@
 
 ## Authors
 
-- **Davis Featherstone** — Intern
-- **Kethan Poduri** — Co-Technical Lead
-- **Daniel Cohen** — Co-Technical Lead
+- **Davis Featherstone** — CEO/CTO/CFO
+- **Kethan Poduri** — Customer Support Intern
+- **Daniel Cohen** — Customer Support Intern
