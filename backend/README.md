@@ -1,21 +1,20 @@
-## 1. Create venv and install packages
+## 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and sync dependencies
 
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
 
 ## 2. Register a face
 
 ```bash
-python register_face.py "Daniel"
+uv run python register_face.py "Daniel"
 ```
+
 ## 3. Run the server
 
 ```bash
-python app.py
+uv run python app.py
 ```
 
 Runs on port 3000 by default.
