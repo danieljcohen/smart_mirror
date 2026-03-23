@@ -2,6 +2,6 @@
 
 ## Authors
 
-- **Davis Featherstone** — Primary Author
-- **Kethan Poduri** — Helper
-- **Daniel Cohen** — Helper
+- **Davis Featherstone** — Intern
+- **Kethan Poduri** — Co-Technical Lead
+- **Daniel Cohen** — Co-Technical Lead
