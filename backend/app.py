@@ -10,8 +10,10 @@ import cv2
 import face_recognition
 import numpy as np
 from flask import Flask, Response, jsonify, request
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
