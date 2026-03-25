@@ -1,7 +1,5 @@
 ## 1. Create venv and install packages
 
-**With uv (recommended):**
-
 ```bash
 cd backend
 uv sync
