@@ -80,7 +80,7 @@ function useWeather() {
         const { latitude, longitude } = await geo.json();
 
         const res = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code`,
+          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`,
         );
         const data = await res.json();
         const code: number = data.current.weather_code;
