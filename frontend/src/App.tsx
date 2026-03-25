@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 const POLL_MS = 3_000;
-const GREETING_TIMEOUT_MS = 30_000;
+const GREETING_TIMEOUT_MS = 6_000;
 
 interface Face {
   name: string;
