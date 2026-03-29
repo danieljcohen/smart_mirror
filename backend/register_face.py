@@ -3,7 +3,11 @@
 Register a new person for facial recognition.
 
 Usage:
-    python register_face.py <person_name>
+    python register_face.py <person_name> [--count N] [--camera N]
+
+Saves captured photos to known_faces/<name>/.  On next server start,
+only the new person's images will be encoded — existing encodings are
+loaded from cache untouched.
 """
 
 import argparse
@@ -14,7 +18,6 @@ import cv2
 import face_recognition
 
 KNOWN_FACES_DIR = Path(__file__).resolve().parent / "known_faces"
-ENCODINGS_CACHE = Path(__file__).resolve().parent / "encodings.pkl"
 
 
 def capture_from_camera(name: str, count: int = 5, camera: int = 0) -> None:
@@ -53,27 +56,21 @@ def capture_from_camera(name: str, count: int = 5, camera: int = 0) -> None:
             if not locations:
                 print("  No face detected – try again.")
                 continue
-            filename = person_dir / f"{name}_{saved + 1:03d}.jpg"
-            cv2.imwrite(str(filename), frame)
+            img_path = person_dir / f"{name}_{saved + 1:03d}.jpg"
+            cv2.imwrite(str(img_path), frame)
             saved += 1
-            print(f"  Saved {filename.name} ({saved}/{count})")
+            print(f"  Saved {img_path.name} ({saved}/{count})")
 
     cap.release()
     cv2.destroyAllWindows()
-    _invalidate_cache()
     print(f"\nDone. {saved} photo(s) saved to {person_dir}")
-
-
-def _invalidate_cache() -> None:
-    if ENCODINGS_CACHE.exists():
-        ENCODINGS_CACHE.unlink()
-        print("Encoding cache cleared – will rebuild on next server start or POST /reload.")
+    print("Restart the server to load the new encodings.")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Register a face for recognition")
     parser.add_argument("name", help="Person's name (used as folder name and label)")
-    parser.add_argument("--count", type=int, default=5, help="Number of photos to capture from camera (default: 5)")
+    parser.add_argument("--count", type=int, default=5, help="Number of photos to capture (default: 5)")
     parser.add_argument("--camera", type=int, default=0, help="Camera index (default: 0)")
     args = parser.parse_args()
 
