@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import GestureController from "./GestureController";
 
 const POLL_MS = 3_000;
 const GREETING_TIMEOUT_MS = 6_000;
@@ -180,21 +182,58 @@ export default function App() {
   const names = useRecognition();
   const weather = useWeather();
 
+  // Persistent initial positions
+  const initialPositions = JSON.parse(localStorage.getItem('widgetPositions') || '{}');
+
+  const handleDragEnd = (name: string, info: any) => {
+    const current = JSON.parse(localStorage.getItem('widgetPositions') || '{}');
+    current[name] = { 
+       x: (current[name]?.x || 0) + info.offset.x, 
+       y: (current[name]?.y || 0) + info.offset.y 
+    };
+    localStorage.setItem('widgetPositions', JSON.stringify(current));
+  };
+
   return (
-    <div className="flex h-screen w-screen flex-col justify-between bg-black p-10 font-sans">
-      {/* Top row: clock left, weather right */}
-      <div className="flex items-start justify-between">
+    <div className="relative h-screen w-screen overflow-hidden bg-black p-10 font-sans">
+      <GestureController />
+
+      <motion.div 
+         className="absolute top-10 left-10"
+         drag
+         dragMomentum={false}
+         initial={initialPositions['clock'] || {x: 0, y: 0}}
+         onDragEnd={(_, info) => handleDragEnd('clock', info)}
+         data-draggable
+      >
         <Clock />
-        {weather && <WeatherWidget weather={weather} />}
-      </div>
+      </motion.div>
 
-      {/* Center greeting */}
-      <div className="flex items-center justify-center">
-        {names.length > 0 && <Greeting names={names} />}
-      </div>
+      {weather && (
+        <motion.div 
+           className="absolute top-10 right-10"
+           drag
+           dragMomentum={false}
+           initial={initialPositions['weather'] || {x: 0, y: 0}}
+           onDragEnd={(_, info) => handleDragEnd('weather', info)}
+           data-draggable
+        >
+          <WeatherWidget weather={weather} />
+        </motion.div>
+      )}
 
-      {/* Bottom spacer to balance the layout */}
-      <div />
+      {names.length > 0 && (
+        <motion.div 
+           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+           drag
+           dragMomentum={false}
+           initial={initialPositions['greeting'] || {x: 0, y: 0}}
+           onDragEnd={(_, info) => handleDragEnd('greeting', info)}
+           data-draggable
+        >
+          <Greeting names={names} />
+        </motion.div>
+      )}
     </div>
   );
 }
