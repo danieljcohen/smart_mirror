@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import face_recognition
 import numpy as np
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -23,6 +23,9 @@ ENCODINGS_CACHE = BASE_DIR / "encodings.pkl"
 
 KNOWN_ENCODINGS: list[np.ndarray] = []
 KNOWN_NAMES: list[str] = []
+
+# Protects all reads/writes to KNOWN_ENCODINGS, KNOWN_NAMES, and the cache file
+_FACE_LOCK = threading.Lock()
 
 DETECTION_MODEL = os.getenv("DETECTION_MODEL", "hog")  # "hog" is faster on Pi, "cnn" is more accurate
 TOLERANCE = float(os.getenv("TOLERANCE", "0.6"))
@@ -75,51 +78,114 @@ atexit.register(_shutdown_camera)
 
 # ── Face encoding ──────────────────────────────────────────────────
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
+
+
+def _load_cache() -> dict:
+    """Return the cache dict, or an empty skeleton if none exists."""
+    if ENCODINGS_CACHE.exists():
+        with open(ENCODINGS_CACHE, "rb") as f:
+            data = pickle.load(f)
+        # Migrate old caches that lack the image_index key
+        if "image_index" not in data:
+            data["image_index"] = {}
+        return data
+    return {"encodings": [], "names": [], "image_index": {}}
+
+
+def _save_cache(data: dict) -> None:
+    """Persist the cache dict to disk. Caller must hold _FACE_LOCK."""
+    with open(ENCODINGS_CACHE, "wb") as f:
+        pickle.dump(data, f)
+
+
 def load_known_faces() -> None:
-    """Scan known_faces/<name>/ directories and build encoding vectors."""
+    """Scan known_faces/<name>/ and encode only images not yet in the cache."""
     global KNOWN_ENCODINGS, KNOWN_NAMES
 
     KNOWN_FACES_DIR.mkdir(parents=True, exist_ok=True)
 
-    if ENCODINGS_CACHE.exists():
-        logger.info("Loading cached encodings from %s", ENCODINGS_CACHE)
-        with open(ENCODINGS_CACHE, "rb") as f:
-            data = pickle.load(f)
-        KNOWN_ENCODINGS = data["encodings"]
-        KNOWN_NAMES = data["names"]
-        logger.info("Loaded %d face(s) from cache", len(KNOWN_NAMES))
-        return
+    with _FACE_LOCK:
+        data = _load_cache()
 
-    encodings, names = [], []
-    for person_dir in sorted(KNOWN_FACES_DIR.iterdir()):
-        if not person_dir.is_dir():
-            continue
-        person_name = person_dir.name
-        for img_path in sorted(person_dir.iterdir()):
-            if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp"}:
+        # Group cached encodings and index entries by person name
+        cached_encs: dict[str, list[np.ndarray]] = {}
+        for enc, name in zip(data["encodings"], data["names"]):
+            cached_encs.setdefault(name, []).append(enc)
+
+        cached_index: dict[str, dict[str, float]] = {}
+        for rel, mtime in data["image_index"].items():
+            parts = Path(rel).parts
+            if len(parts) >= 2:
+                cached_index.setdefault(parts[1], {})[rel] = mtime
+
+        final_encodings: list[np.ndarray] = []
+        final_names: list[str] = []
+        final_index: dict[str, float] = {}
+        changed = False
+        disk_people: set[str] = set()
+
+        for person_dir in sorted(KNOWN_FACES_DIR.iterdir()):
+            if not person_dir.is_dir():
                 continue
-            logger.info("Encoding %s -> %s", person_name, img_path.name)
-            image = face_recognition.load_image_file(str(img_path))
-            face_encs = face_recognition.face_encodings(image, model=DETECTION_MODEL)
-            if face_encs:
-                encodings.append(face_encs[0])
-                names.append(person_name)
-            else:
-                logger.warning("No face found in %s", img_path)
+            person_name = person_dir.name
+            disk_people.add(person_name)
 
-    KNOWN_ENCODINGS = encodings
-    KNOWN_NAMES = names
+            # Map rel_path -> mtime for every image currently on disk
+            disk_files: dict[str, float] = {
+                str(p.relative_to(BASE_DIR)): p.stat().st_mtime
+                for p in sorted(person_dir.iterdir())
+                if p.suffix.lower() in IMAGE_EXTS
+            }
 
-    with open(ENCODINGS_CACHE, "wb") as f:
-        pickle.dump({"encodings": encodings, "names": names}, f)
+            if disk_files == cached_index.get(person_name, {}):
+                # Nothing changed — reuse cached encodings directly
+                for enc in cached_encs.get(person_name, []):
+                    final_encodings.append(enc)
+                    final_names.append(person_name)
+                final_index.update(disk_files)
+                continue
 
-    logger.info("Encoded and cached %d face(s)", len(names))
+            # Something changed — re-encode this person from scratch
+            changed = True
+            logger.info("Re-encoding '%s' (files added, removed, or replaced)", person_name)
+            for rel, mtime in disk_files.items():
+                img_path = BASE_DIR / rel
+                image = face_recognition.load_image_file(str(img_path))
+                face_encs = face_recognition.face_encodings(image, model=DETECTION_MODEL)
+                if face_encs:
+                    final_encodings.append(face_encs[0])
+                    final_names.append(person_name)
+                    final_index[rel] = mtime
+                else:
+                    logger.warning("No face found in %s", img_path.name)
+
+        # Detect people whose folders were deleted entirely
+        removed = set(cached_index.keys()) - disk_people
+        if removed:
+            changed = True
+            logger.info("Dropped stale encodings for removed people: %s", removed)
+
+        KNOWN_ENCODINGS = final_encodings
+        KNOWN_NAMES = final_names
+
+        if changed:
+            _save_cache({"encodings": final_encodings, "names": final_names, "image_index": final_index})
+            logger.info("Cache updated; %d total encoding(s)", len(final_names))
+        else:
+            logger.info("Loaded %d encoding(s) from cache (nothing changed)", len(final_names))
 
 
 # ── Recognition helpers ────────────────────────────────────────────
 
 def recognize_frame(frame: np.ndarray) -> list[dict]:
     """Run recognition on a single BGR frame."""
+    # Snapshot under the lock so a concurrent /register or /reload can't mutate
+    # the lists while face_distance (a C extension that releases the GIL) runs.
+    with _FACE_LOCK:
+        known_encs = list(KNOWN_ENCODINGS)
+        known_names = list(KNOWN_NAMES)
+
     small = cv2.resize(frame, (0, 0), fx=FRAME_RESIZE, fy=FRAME_RESIZE)
     rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
@@ -132,11 +198,11 @@ def recognize_frame(frame: np.ndarray) -> list[dict]:
         name = "unknown"
         confidence = 0.0
 
-        if KNOWN_ENCODINGS:
-            distances = face_recognition.face_distance(KNOWN_ENCODINGS, encoding)
+        if known_encs:
+            distances = face_recognition.face_distance(known_encs, encoding)
             best_idx = int(np.argmin(distances))
             if distances[best_idx] <= TOLERANCE:
-                name = KNOWN_NAMES[best_idx]
+                name = known_names[best_idx]
                 confidence = round(1.0 - distances[best_idx], 3)
 
         results.append({
@@ -208,7 +274,7 @@ def list_people():
     for person_dir in sorted(KNOWN_FACES_DIR.iterdir()):
         if person_dir.is_dir():
             images = [f.name for f in person_dir.iterdir()
-                      if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}]
+                      if f.suffix.lower() in IMAGE_EXTS]
             people[person_dir.name] = {"image_count": len(images), "images": sorted(images)}
     return jsonify(people)
 
