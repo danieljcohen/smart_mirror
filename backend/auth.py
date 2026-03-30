@@ -119,6 +119,51 @@ def name_login():
     return jsonify({"token": token, "user": user})
 
 
+@auth_bp.post("/register")
+def register():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    images_b64: list[str] = data.get("images") or []
+
+    if not name:
+        return jsonify({"error": "missing 'name' field"}), 400
+    if not images_b64:
+        return jsonify({"error": "at least one image required"}), 400
+
+    from app import KNOWN_FACES_DIR, load_known_faces
+
+    person_dir = KNOWN_FACES_DIR / name
+    person_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for i, img_b64 in enumerate(images_b64):
+        if "," in img_b64:
+            img_b64 = img_b64.split(",", 1)[1]
+        try:
+            img_bytes = base64.b64decode(img_b64)
+            arr = np.frombuffer(img_bytes, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            if not face_recognition.face_encodings(rgb):
+                logger.warning("No face detected in registration image %d for '%s'", i, name)
+                continue
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            cv2.imwrite(str(person_dir / f"{ts}_{i}.jpg"), img)
+            saved += 1
+        except Exception as e:
+            logger.warning("Failed to save registration image %d for '%s': %s", i, name, e)
+
+    if saved == 0:
+        return jsonify({"error": "no face detected in any of the provided images"}), 400
+
+    load_known_faces()
+    user = ensure_user(name)
+    token = _create_token(user)
+    return jsonify({"token": token, "user": user, "images_saved": saved})
+
+
 @auth_bp.get("/me")
 @require_auth
 def me(current_user: dict):
