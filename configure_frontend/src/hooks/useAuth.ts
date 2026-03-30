@@ -67,10 +67,25 @@ export function useAuth() {
     setState({ user, token, loading: false });
   }, []);
 
+  const register = useCallback(async (name: string, images: string[]) => {
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, images }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Registration failed");
+    }
+    const { token, user } = await res.json();
+    localStorage.setItem(TOKEN_KEY, token);
+    setState({ user, token, loading: false });
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setState({ user: null, token: null, loading: false });
   }, []);
 
-  return { ...state, loginWithFace, loginWithName, logout };
+  return { ...state, loginWithFace, loginWithName, register, logout };
 }

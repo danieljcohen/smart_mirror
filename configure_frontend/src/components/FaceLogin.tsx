@@ -3,9 +3,10 @@ import { useCallback, useRef, useState } from "react";
 interface FaceLoginProps {
   onFaceCapture: (base64: string) => Promise<void>;
   onNameLogin: (name: string) => Promise<void>;
+  onRegister: () => void;
 }
 
-export function FaceLogin({ onFaceCapture, onNameLogin }: FaceLoginProps) {
+export function FaceLogin({ onFaceCapture, onNameLogin, onRegister }: FaceLoginProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -151,6 +152,19 @@ export function FaceLogin({ onFaceCapture, onNameLogin }: FaceLoginProps) {
             {error}
           </p>
         )}
+
+        <div className="flex items-center gap-4">
+          <div className="h-px flex-1 bg-zinc-800" />
+          <span className="text-sm text-zinc-500">new here?</span>
+          <div className="h-px flex-1 bg-zinc-800" />
+        </div>
+
+        <button
+          onClick={onRegister}
+          className="w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-300 transition hover:border-zinc-600 hover:text-white"
+        >
+          Register a new face →
+        </button>
       </div>
     </div>
   );
