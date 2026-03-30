@@ -3,5 +3,6 @@ venv/
 __pycache__/
 *.pyc
 encodings.pkl
+mirror.db
 node_modules/
 dist/

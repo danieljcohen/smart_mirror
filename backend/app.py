@@ -12,8 +12,12 @@ import numpy as np
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
+from db import init_db, seed_users_from_faces, get_user_by_name, get_layout, save_layout, DEFAULT_LAYOUT
+from auth import auth_bp, require_auth
+
 app = Flask(__name__)
 CORS(app)
+app.register_blueprint(auth_bp)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -219,10 +223,55 @@ def reload_faces():
     if ENCODINGS_CACHE.exists():
         ENCODINGS_CACHE.unlink()
     load_known_faces()
+    seed_users_from_faces()
     return jsonify({"status": "reloaded", "known_people": sorted(set(KNOWN_NAMES))})
 
 
+# ── Layout endpoints ────────────────────────────────────────────────
+
+AVAILABLE_WIDGETS = [
+    {"id": "clock", "name": "Clock", "description": "Current time and date", "defaultLayout": {"w": 4, "h": 2, "minW": 2, "minH": 2}},
+    {"id": "weather", "name": "Weather", "description": "Local weather conditions", "defaultLayout": {"w": 4, "h": 2, "minW": 3, "minH": 2}},
+    {"id": "greeting", "name": "Greeting", "description": "Personalized greeting message", "defaultLayout": {"w": 6, "h": 2, "minW": 3, "minH": 2}},
+]
+
+
+@app.get("/widgets")
+def list_widgets():
+    return jsonify(AVAILABLE_WIDGETS)
+
+
+@app.get("/layout/<name>")
+def get_layout_by_name(name: str):
+    """Public endpoint used by the mirror display."""
+    user = get_user_by_name(name)
+    if user is None:
+        return jsonify({"layout": DEFAULT_LAYOUT})
+    layout = get_layout(user["id"])
+    return jsonify({"layout": layout or DEFAULT_LAYOUT})
+
+
+@app.get("/layout")
+@require_auth
+def get_my_layout(current_user: dict):
+    layout = get_layout(current_user["id"])
+    return jsonify({"layout": layout or DEFAULT_LAYOUT})
+
+
+@app.put("/layout")
+@require_auth
+def save_my_layout(current_user: dict):
+    data = request.get_json(silent=True) or {}
+    layout = data.get("layout")
+    if not isinstance(layout, list):
+        return jsonify({"error": "missing 'layout' array"}), 400
+    save_layout(current_user["id"], layout)
+    return jsonify({"status": "saved"})
+
+
 if __name__ == "__main__":
+    init_db()
     load_known_faces()
+    seed_users_from_faces()
     get_camera()
     app.run(host="0.0.0.0", port=3000, debug=False)
