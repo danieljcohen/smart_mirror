@@ -6,3 +6,6 @@ encodings.pkl
 mirror.db
 node_modules/
 dist/
+.env
+.env.local
+known_faces/

@@ -1,19 +1,19 @@
 import os
 import atexit
-import pickle
 import logging
 import threading
+import time
 from datetime import datetime
-from pathlib import Path
 
 import cv2
 import face_recognition
 import numpy as np
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify
 from flask_cors import CORS
 
-from db import init_db, seed_users_from_faces, get_user_by_name, get_layout, save_layout, DEFAULT_LAYOUT
-from auth import auth_bp, require_auth
+from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT
+from auth import auth_bp
+import face_store
 
 app = Flask(__name__)
 CORS(app)
@@ -21,20 +21,11 @@ app.register_blueprint(auth_bp)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
-KNOWN_FACES_DIR = BASE_DIR / "known_faces"
-ENCODINGS_CACHE = BASE_DIR / "encodings.pkl"
-
-KNOWN_ENCODINGS: list[np.ndarray] = []
-KNOWN_NAMES: list[str] = []
-
-# Protects all reads/writes to KNOWN_ENCODINGS, KNOWN_NAMES, and the cache file
-_FACE_LOCK = threading.Lock()
-
 DETECTION_MODEL = os.getenv("DETECTION_MODEL", "hog")  # "hog" is faster on Pi, "cnn" is more accurate
 TOLERANCE = float(os.getenv("TOLERANCE", "0.6"))
 FRAME_RESIZE = float(os.getenv("FRAME_RESIZE", "0.25"))  # scale down for speed on Pi
 CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
+ENCODING_POLL_INTERVAL = int(os.getenv("ENCODING_POLL_INTERVAL", "300"))  # seconds
 
 
 # ── Persistent camera ──────────────────────────────────────────────
@@ -82,113 +73,21 @@ atexit.register(_shutdown_camera)
 
 # ── Face encoding ──────────────────────────────────────────────────
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
-
-
-def _load_cache() -> dict:
-    """Return the cache dict, or an empty skeleton if none exists."""
-    if ENCODINGS_CACHE.exists():
-        with open(ENCODINGS_CACHE, "rb") as f:
-            data = pickle.load(f)
-        # Migrate old caches that lack the image_index key
-        if "image_index" not in data:
-            data["image_index"] = {}
-        return data
-    return {"encodings": [], "names": [], "image_index": {}}
-
-
-def _save_cache(data: dict) -> None:
-    """Persist the cache dict to disk. Caller must hold _FACE_LOCK."""
-    with open(ENCODINGS_CACHE, "wb") as f:
-        pickle.dump(data, f)
-
-
-def load_known_faces() -> None:
-    """Scan known_faces/<name>/ and encode only images not yet in the cache."""
-    global KNOWN_ENCODINGS, KNOWN_NAMES
-
-    KNOWN_FACES_DIR.mkdir(parents=True, exist_ok=True)
-
-    with _FACE_LOCK:
-        data = _load_cache()
-
-        # Group cached encodings and index entries by person name
-        cached_encs: dict[str, list[np.ndarray]] = {}
-        for enc, name in zip(data["encodings"], data["names"]):
-            cached_encs.setdefault(name, []).append(enc)
-
-        cached_index: dict[str, dict[str, float]] = {}
-        for rel, mtime in data["image_index"].items():
-            parts = Path(rel).parts
-            if len(parts) >= 2:
-                cached_index.setdefault(parts[1], {})[rel] = mtime
-
-        final_encodings: list[np.ndarray] = []
-        final_names: list[str] = []
-        final_index: dict[str, float] = {}
-        changed = False
-        disk_people: set[str] = set()
-
-        for person_dir in sorted(KNOWN_FACES_DIR.iterdir()):
-            if not person_dir.is_dir():
-                continue
-            person_name = person_dir.name
-            disk_people.add(person_name)
-
-            # Map rel_path -> mtime for every image currently on disk
-            disk_files: dict[str, float] = {
-                str(p.relative_to(BASE_DIR)): p.stat().st_mtime
-                for p in sorted(person_dir.iterdir())
-                if p.suffix.lower() in IMAGE_EXTS
-            }
-
-            if disk_files == cached_index.get(person_name, {}):
-                # Nothing changed — reuse cached encodings directly
-                for enc in cached_encs.get(person_name, []):
-                    final_encodings.append(enc)
-                    final_names.append(person_name)
-                final_index.update(disk_files)
-                continue
-
-            # Something changed — re-encode this person from scratch
-            changed = True
-            logger.info("Re-encoding '%s' (files added, removed, or replaced)", person_name)
-            for rel, mtime in disk_files.items():
-                img_path = BASE_DIR / rel
-                image = face_recognition.load_image_file(str(img_path))
-                face_encs = face_recognition.face_encodings(image, model=DETECTION_MODEL)
-                if face_encs:
-                    final_encodings.append(face_encs[0])
-                    final_names.append(person_name)
-                    final_index[rel] = mtime
-                else:
-                    logger.warning("No face found in %s", img_path.name)
-
-        # Detect people whose folders were deleted entirely
-        removed = set(cached_index.keys()) - disk_people
-        if removed:
-            changed = True
-            logger.info("Dropped stale encodings for removed people: %s", removed)
-
-        KNOWN_ENCODINGS = final_encodings
-        KNOWN_NAMES = final_names
-
-        if changed:
-            _save_cache({"encodings": final_encodings, "names": final_names, "image_index": final_index})
-            logger.info("Cache updated; %d total encoding(s)", len(final_names))
-        else:
-            logger.info("Loaded %d encoding(s) from cache (nothing changed)", len(final_names))
+def _encoding_poll_loop() -> None:
+    """Background thread: periodically refresh encodings from Supabase."""
+    while True:
+        time.sleep(ENCODING_POLL_INTERVAL)
+        logger.debug("Polling Supabase for new face encodings…")
+        face_store.load_known_faces()
 
 
 # ── Recognition helpers ────────────────────────────────────────────
 
 def recognize_frame(frame: np.ndarray) -> list[dict]:
     """Run recognition on a single BGR frame."""
-    # Snapshot under the lock so a concurrent /register or /reload can't mutate
-    # the lists while face_distance (a C extension that releases the GIL) runs.
-    with _FACE_LOCK:
-        known_encs = list(KNOWN_ENCODINGS)
-        known_names = list(KNOWN_NAMES)
+    with face_store._FACE_LOCK:
+        known_encs = list(face_store.KNOWN_ENCODINGS)
+        known_names = list(face_store.KNOWN_NAMES)
 
     small = cv2.resize(frame, (0, 0), fx=FRAME_RESIZE, fy=FRAME_RESIZE)
     rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
@@ -226,7 +125,7 @@ def _draw_labels(frame: np.ndarray, faces: list[dict]) -> np.ndarray:
         cv2.rectangle(frame, (f["left"], f["top"]), (f["right"], f["bottom"]), color, 2)
         label = f"{f['name']} ({f['confidence']:.0%})" if f["name"] != "unknown" else "unknown"
         cv2.putText(frame, label, (f["left"], f["top"] - 10),
-                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     return frame
 
 
@@ -272,25 +171,22 @@ def video_feed():
 
 @app.get("/people")
 def list_people():
-    """List all registered people and their image counts."""
-    KNOWN_FACES_DIR.mkdir(parents=True, exist_ok=True)
-    people = {}
-    for person_dir in sorted(KNOWN_FACES_DIR.iterdir()):
-        if person_dir.is_dir():
-            images = [f.name for f in person_dir.iterdir()
-                      if f.suffix.lower() in IMAGE_EXTS]
-            people[person_dir.name] = {"image_count": len(images), "images": sorted(images)}
+    """List all registered people and their encoding counts."""
+    from db import get_supabase
+    sb = get_supabase()
+    result = sb.table("users").select("name, face_encodings(id)").execute()
+    people = {
+        u["name"]: {"encoding_count": len(u.get("face_encodings") or [])}
+        for u in result.data
+    }
     return jsonify(people)
 
 
 @app.post("/reload")
 def reload_faces():
-    """Delete the cache and re-encode all known faces."""
-    if ENCODINGS_CACHE.exists():
-        ENCODINGS_CACHE.unlink()
-    load_known_faces()
-    seed_users_from_faces()
-    return jsonify({"status": "reloaded", "known_people": sorted(set(KNOWN_NAMES))})
+    """Reload face encodings from Supabase."""
+    face_store.load_known_faces()
+    return jsonify({"status": "reloaded", "known_people": sorted(set(face_store.KNOWN_NAMES))})
 
 
 # ── Layout endpoints ────────────────────────────────────────────────
@@ -309,7 +205,7 @@ def list_widgets():
 
 @app.get("/layout/<name>")
 def get_layout_by_name(name: str):
-    """Public endpoint used by the mirror display."""
+    """Public endpoint used by the mirror display to fetch a user's layout."""
     user = get_user_by_name(name)
     if user is None:
         return jsonify({"layout": DEFAULT_LAYOUT})
@@ -317,27 +213,12 @@ def get_layout_by_name(name: str):
     return jsonify({"layout": layout or DEFAULT_LAYOUT})
 
 
-@app.get("/layout")
-@require_auth
-def get_my_layout(current_user: dict):
-    layout = get_layout(current_user["id"])
-    return jsonify({"layout": layout or DEFAULT_LAYOUT})
-
-
-@app.put("/layout")
-@require_auth
-def save_my_layout(current_user: dict):
-    data = request.get_json(silent=True) or {}
-    layout = data.get("layout")
-    if not isinstance(layout, list):
-        return jsonify({"error": "missing 'layout' array"}), 400
-    save_layout(current_user["id"], layout)
-    return jsonify({"status": "saved"})
-
 
 if __name__ == "__main__":
     init_db()
-    load_known_faces()
-    seed_users_from_faces()
+    face_store.load_known_faces()
+    # Refresh encodings from Supabase in the background
+    t = threading.Thread(target=_encoding_poll_loop, daemon=True)
+    t.start()
     get_camera()
     app.run(host="0.0.0.0", port=3000, debug=False)

@@ -1,106 +1,92 @@
 import json
-import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
+import logging
+import os
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "mirror.db"
-KNOWN_FACES_DIR = BASE_DIR / "known_faces"
+from supabase import create_client, Client
 
+logger = logging.getLogger(__name__)
+
+# Default layout uses percentage-based coordinates (0-100)
 DEFAULT_LAYOUT = [
-    {"widgetId": "clock", "x": 0, "y": 0, "w": 4, "h": 2},
-    {"widgetId": "weather", "x": 8, "y": 0, "w": 4, "h": 2},
-    {"widgetId": "greeting", "x": 3, "y": 4, "w": 6, "h": 2},
+    {"widgetId": "clock",    "x": 0,     "y": 0,  "w": 33.33, "h": 25},
+    {"widgetId": "weather",  "x": 66.67, "y": 0,  "w": 33.33, "h": 25},
+    {"widgetId": "greeting", "x": 25,    "y": 50, "w": 50,    "h": 25},
 ]
 
+_supabase: Client | None = None
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+
+def get_supabase() -> Client:
+    global _supabase
+    if _supabase is None:
+        url = os.environ["SUPABASE_URL"]
+        key = os.environ["SUPABASE_KEY"]
+        _supabase = create_client(url, key)
+    return _supabase
 
 
 def init_db() -> None:
-    conn = get_db()
-    try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS users (
-                id   INTEGER PRIMARY KEY,
-                name TEXT    UNIQUE NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS layouts (
-                id          INTEGER PRIMARY KEY,
-                user_id     INTEGER NOT NULL REFERENCES users(id),
-                layout_json TEXT    NOT NULL,
-                updated_at  TEXT    NOT NULL,
-                UNIQUE(user_id)
-            );
-        """)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def seed_users_from_faces() -> None:
-    """Insert a user row for every subdirectory in known_faces/."""
-    KNOWN_FACES_DIR.mkdir(parents=True, exist_ok=True)
-    conn = get_db()
-    try:
-        for person_dir in sorted(KNOWN_FACES_DIR.iterdir()):
-            if person_dir.is_dir():
-                conn.execute(
-                    "INSERT OR IGNORE INTO users (name) VALUES (?)",
-                    (person_dir.name,),
-                )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def get_user_by_name(name: str) -> dict | None:
-    conn = get_db()
-    try:
-        row = conn.execute("SELECT id, name FROM users WHERE name = ?", (name,)).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
+    """Verify Supabase connectivity on startup."""
+    sb = get_supabase()
+    sb.table("users").select("id").limit(1).execute()
+    logger.info("Supabase connection OK")
 
 
 def ensure_user(name: str) -> dict:
-    """Get or create a user by name."""
-    conn = get_db()
-    try:
-        conn.execute("INSERT OR IGNORE INTO users (name) VALUES (?)", (name,))
-        conn.commit()
-        row = conn.execute("SELECT id, name FROM users WHERE name = ?", (name,)).fetchone()
-        return dict(row)
-    finally:
-        conn.close()
+    """Get or create a user row by name. Returns {id, name}."""
+    sb = get_supabase()
+    result = sb.table("users").select("id, name").eq("name", name).execute()
+    if result.data:
+        return result.data[0]
+    insert_result = sb.table("users").insert({"name": name}).execute()
+    return insert_result.data[0]
+
+
+def get_user_by_name(name: str) -> dict | None:
+    sb = get_supabase()
+    result = sb.table("users").select("id, name").eq("name", name).execute()
+    return result.data[0] if result.data else None
 
 
 def get_layout(user_id: int) -> list | None:
-    conn = get_db()
-    try:
-        row = conn.execute(
-            "SELECT layout_json FROM layouts WHERE user_id = ?", (user_id,)
-        ).fetchone()
-        return json.loads(row["layout_json"]) if row else None
-    finally:
-        conn.close()
+    sb = get_supabase()
+    result = sb.table("layouts").select("layout_json").eq("user_id", user_id).execute()
+    if not result.data:
+        return None
+    layout = result.data[0]["layout_json"]
+    # JSONB comes back as a Python list; handle stringified JSON as a fallback
+    return layout if isinstance(layout, list) else json.loads(layout)
 
 
 def save_layout(user_id: int, layout: list) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        conn.execute(
-            """INSERT INTO layouts (user_id, layout_json, updated_at)
-               VALUES (?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET layout_json = excluded.layout_json,
-                                                   updated_at  = excluded.updated_at""",
-            (user_id, json.dumps(layout), now),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    sb = get_supabase()
+    sb.table("layouts").upsert(
+        {"user_id": user_id, "layout_json": layout},
+        on_conflict="user_id",
+    ).execute()
+
+
+def get_all_encodings() -> list[dict]:
+    """Return all stored face encodings as [{name, encoding}] dicts."""
+    sb = get_supabase()
+    enc_result = sb.table("face_encodings").select("user_id, encoding").execute()
+    if not enc_result.data:
+        return []
+
+    user_ids = list({row["user_id"] for row in enc_result.data})
+    users_result = sb.table("users").select("id, name").in_("id", user_ids).execute()
+    user_map = {u["id"]: u["name"] for u in users_result.data}
+
+    return [
+        {"name": user_map[row["user_id"]], "encoding": row["encoding"]}
+        for row in enc_result.data
+        if row["user_id"] in user_map
+    ]
+
+
+def save_encoding(user_id: int, encoding_list: list[float]) -> None:
+    """Persist a single 128-float face encoding to Supabase."""
+    sb = get_supabase()
+    sb.table("face_encodings").insert(
+        {"user_id": user_id, "encoding": encoding_list}
+    ).execute()

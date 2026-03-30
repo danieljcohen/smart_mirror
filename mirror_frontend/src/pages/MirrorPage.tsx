@@ -36,18 +36,35 @@ export default function MirrorPage() {
   const names = useRecognition();
   const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT);
   const lastFetched = useRef<string>("");
+  // Stable ref so the polling interval never needs to restart
+  const namesRef = useRef<string[]>(names);
+  useEffect(() => { namesRef.current = names; }, [names]);
 
-  useEffect(() => {
-    const primaryName = names[0];
-    if (!primaryName || primaryName === lastFetched.current) return;
-    lastFetched.current = primaryName;
-    fetch(`/api/layout/${encodeURIComponent(primaryName)}`)
+  const fetchLayout = (name: string) => {
+    fetch(`/api/layout/${encodeURIComponent(name)}`)
       .then(r => r.json())
       .then(data => {
         if (data.layout?.length) setLayout(normalizeLayout(data.layout));
       })
       .catch(() => {});
+  };
+
+  // Fetch immediately when the recognized person changes
+  useEffect(() => {
+    const primaryName = names[0];
+    if (!primaryName || primaryName === lastFetched.current) return;
+    lastFetched.current = primaryName;
+    fetchLayout(primaryName);
   }, [names]);
+
+  // Re-fetch every 10s — empty deps so the interval is never torn down mid-cycle
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const primaryName = namesRef.current[0];
+      if (primaryName) fetchLayout(primaryName);
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <RecognitionContext.Provider value={names}>

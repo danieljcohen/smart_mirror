@@ -1,39 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getAllWidgets, getWidget } from "../widgets";
 import { WidgetRenderer } from "./WidgetRenderer";
+import { type LayoutItem, getUser, loadLayout, saveLayout } from "../db/layout";
 
 const ASPECT = 16 / 9;
-const MIN_W = 8;  // minimum % width
-const MIN_H = 8;  // minimum % height
-
-interface LayoutItem {
-  widgetId: string;
-  x: number;  // 0–100 percent of container width
-  y: number;  // 0–100 percent of container height
-  w: number;  // percent of container width
-  h: number;  // percent of container height
-}
-
-interface LayoutEditorProps {
-  token: string;
-  userName: string;
-  onLogout: () => void;
-}
-
-// Migrate old grid-coord layout (w≤12, h≤8) to percent
-function normalizeLayout(items: LayoutItem[]): LayoutItem[] {
-  if (!items.length) return items;
-  if (items.every(i => i.w <= 12 && i.h <= 8)) {
-    return items.map(i => ({
-      ...i,
-      x: +((i.x / 12) * 100).toFixed(2),
-      y: +((i.y / 8) * 100).toFixed(2),
-      w: +((i.w / 12) * 100).toFixed(2),
-      h: +((i.h / 8) * 100).toFixed(2),
-    }));
-  }
-  return items;
-}
+const MIN_W = 8;
+const MIN_H = 8;
 
 type DragState = {
   widgetId: string;
@@ -46,27 +18,52 @@ type DragState = {
   origH: number;
 };
 
-export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
+interface LayoutEditorProps {
+  userName: string;
+  onLogout: () => void;
+  onRegister: () => void;
+}
+
+export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorProps) {
+  const [userId, setUserId] = useState<number | null>(null);
   const [layout, setLayout] = useState<LayoutItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
-  const [loaded, setLoaded] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  // Track unsaved changes so we don't prompt unnecessarily
+  const dirtyRef = useRef(false);
 
+  // On mount: create/look up user in Supabase, then load their layout
   useEffect(() => {
-    fetch("/api/layout", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => {
-        setLayout(normalizeLayout(data.layout || []));
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
-  }, [token]);
+    let cancelled = false;
+    async function init() {
+      setLoading(true);
+      try {
+        const uid = await getUser(userName);
+        if (uid === null) {
+          // User was removed from DB — kick back to login
+          onLogout();
+          return;
+        }
+        const remote = await loadLayout(uid, userName);
+        if (!cancelled) {
+          setUserId(uid);
+          setLayout(remote);
+        }
+      } catch (err) {
+        console.error("[LayoutEditor] init error:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    init();
+    return () => { cancelled = true; };
+  }, [userName]);
 
-  // Global pointer move/up — stable, mounted once
+  // Global pointer handlers for drag & resize
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const d = dragRef.current;
@@ -93,10 +90,10 @@ export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
           }
         })
       );
+      dirtyRef.current = true;
     };
 
     const onUp = () => { dragRef.current = null; };
-
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     return () => {
@@ -128,47 +125,51 @@ export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
       const dl = def?.defaultLayout ?? { w: 4, h: 2 };
       return [...prev, {
         widgetId,
-        x: 5,
-        y: 5,
+        x: 5, y: 5,
         w: +((dl.w / 12) * 100).toFixed(2),
         h: +((dl.h / 8) * 100).toFixed(2),
       }];
     });
+    dirtyRef.current = true;
   }, []);
 
   const removeWidget = useCallback((widgetId: string) => {
     setLayout(prev => prev.filter(i => i.widgetId !== widgetId));
+    dirtyRef.current = true;
   }, []);
 
-  const save = useCallback(async () => {
+  const handleSave = async () => {
     setSaving(true);
     setSaveMsg("");
     try {
-      const res = await fetch("/api/layout", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ layout }),
-      });
-      if (!res.ok) throw new Error();
+      // Always re-fetch the userId to avoid stale state causing FK violations
+      const freshId = await getUser(userName);
+      if (!freshId) {
+        onLogout(); // User no longer exists in DB
+        return;
+      }
+      setUserId(freshId);
+      await saveLayout(freshId, userName, layout);
       setSaveMsg("Saved!");
-    } catch {
-      setSaveMsg("Failed to save");
+      dirtyRef.current = false;
+    } catch (err) {
+      setSaveMsg(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
-      setTimeout(() => setSaveMsg(""), 2000);
+      setTimeout(() => setSaveMsg(""), 3000);
     }
-  }, [token, layout]);
-
-  if (!loaded) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">
-        Loading...
-      </div>
-    );
-  }
+  };
 
   const allWidgets = getAllWidgets();
   const activeIds = new Set(layout.map(i => i.widgetId));
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+        <div className="text-zinc-400">Loading layout…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950">
@@ -176,7 +177,7 @@ export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-xl font-light text-white">Layout Editor</h1>
-            <p className="text-sm text-zinc-500">Signed in as {userName}</p>
+            <p className="text-sm text-zinc-500">{userName}</p>
           </div>
           <div className="flex items-center gap-3">
             {saveMsg && (
@@ -185,24 +186,30 @@ export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
               </span>
             )}
             <button
-              onClick={save}
-              disabled={saving}
-              className="rounded-lg bg-blue-600 px-5 py-2 text-sm text-white transition hover:bg-blue-500 disabled:opacity-50"
+              onClick={handleSave}
+              disabled={saving || !userId}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-500 disabled:opacity-50"
             >
-              {saving ? "Saving..." : "Save Layout"}
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={onRegister}
+              className="rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-300 transition hover:bg-zinc-700"
+            >
+              Register Face
             </button>
             <button
               onClick={onLogout}
               className="rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-300 transition hover:bg-zinc-700"
             >
-              Logout
+              Switch user
             </button>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-7xl px-6 py-6 space-y-6">
-        {/* 16:9 preview — widgets placed freely by percent coordinates */}
+        {/* 16:9 mirror preview */}
         <div
           ref={containerRef}
           className="relative w-full select-none overflow-hidden rounded-2xl border border-zinc-800 bg-black"
@@ -226,7 +233,6 @@ export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
               }}
               onPointerDown={e => startInteraction(e, item.widgetId, "drag")}
             >
-              {/* Remove button */}
               <button
                 onPointerDown={e => e.stopPropagation()}
                 onClick={() => removeWidget(item.widgetId)}
@@ -234,13 +240,9 @@ export function LayoutEditor({ token, userName, onLogout }: LayoutEditorProps) {
               >
                 ✕
               </button>
-
-              {/* Widget content */}
               <div className="h-full w-full overflow-hidden rounded-xl p-2">
                 <WidgetRenderer widgetId={item.widgetId} />
               </div>
-
-              {/* Resize handle — bottom-right corner */}
               <div
                 className="absolute bottom-0 right-0 z-20 h-7 w-7 cursor-se-resize"
                 onPointerDown={e => startInteraction(e, item.widgetId, "resize")}

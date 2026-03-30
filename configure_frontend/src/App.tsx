@@ -1,41 +1,54 @@
 import { useState } from "react";
-import { useAuth } from "./hooks/useAuth";
-import { FaceLogin } from "./components/FaceLogin";
-import { RegisterFace } from "./components/RegisterFace";
+import { useUser } from "./hooks/useUser";
+import { NameEntry } from "./components/NameEntry";
 import { LayoutEditor } from "./components/LayoutEditor";
+import { RegisterFace } from "./components/RegisterFace";
 import "./widgets";
 
-type View = "login" | "register";
+type View = "login" | "editor" | "register";
 
 export default function App() {
-  const { user, token, loading, loginWithFace, loginWithName, register, logout } = useAuth();
-  const [view, setView] = useState<View>("login");
+  const { name, login, logout } = useUser();
+  const [view, setView] = useState<View>(name ? "editor" : "login");
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">
-        Loading...
-      </div>
-    );
-  }
+  const handleLogin = (userName: string) => {
+    login(userName);
+    setView("editor");
+  };
 
-  if (user && token) {
-    return <LayoutEditor token={token} userName={user.name} onLogout={logout} />;
-  }
+  const handleLogout = () => {
+    logout();
+    setView("login");
+  };
+
+  const handleRegisterSuccess = (registeredName: string) => {
+    login(registeredName);
+    setView("editor");
+  };
 
   if (view === "register") {
     return (
       <RegisterFace
-        onRegister={register}
-        onBack={() => setView("login")}
+        defaultName={name ?? ""}
+        onBack={() => setView(name ? "editor" : "login")}
+        onSuccess={handleRegisterSuccess}
+      />
+    );
+  }
+
+  if (!name || view === "login") {
+    return (
+      <NameEntry
+        onLogin={handleLogin}
+        onRegister={() => setView("register")}
       />
     );
   }
 
   return (
-    <FaceLogin
-      onFaceCapture={loginWithFace}
-      onNameLogin={loginWithName}
+    <LayoutEditor
+      userName={name}
+      onLogout={handleLogout}
       onRegister={() => setView("register")}
     />
   );
