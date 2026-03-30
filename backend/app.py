@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import face_recognition
 import numpy as np
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 from db import init_db, seed_users_from_faces, get_user_by_name, get_layout, save_layout, DEFAULT_LAYOUT

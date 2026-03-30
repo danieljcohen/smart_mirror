@@ -12,7 +12,7 @@ function Greeting() {
 
   if (!names.length) {
     return (
-      <div className="flex h-full items-center justify-center text-white/20 text-lg font-light">
+      <div className="flex h-full items-center justify-center text-white/20 font-light" style={{ fontSize: "12cqmin" }}>
         Waiting for someone...
       </div>
     );
@@ -20,7 +20,7 @@ function Greeting() {
 
   return (
     <div className="flex h-full items-center justify-center animate-fade-in text-center">
-      <div className="text-4xl font-light text-white/90">
+      <div className="font-light text-white/90" style={{ fontSize: "24cqmin" }}>
         Hello, <span className="font-normal">{formatNames(names)}</span>
       </div>
     </div>
@@ -31,7 +31,7 @@ registerWidget({
   id: "greeting",
   name: "Greeting",
   description: "Personalized greeting message",
-  defaultLayout: { w: 6, h: 2, minW: 3, minH: 2 },
+  defaultLayout: { w: 6, h: 2, minW: 3, minH: 1 },
   component: Greeting,
 });
 

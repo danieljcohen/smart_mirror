@@ -22,8 +22,8 @@ function Clock() {
   return (
     <div className="flex h-full items-center text-white/90">
       <div>
-        <div className="text-5xl font-extralight tracking-tight">{time}</div>
-        <div className="mt-1 text-lg font-light text-white/50">{date}</div>
+        <div className="font-extralight tracking-tight" style={{ fontSize: "30cqmin" }}>{time}</div>
+        <div className="font-light text-white/50" style={{ fontSize: "11cqmin" }}>{date}</div>
       </div>
     </div>
   );
@@ -33,7 +33,7 @@ registerWidget({
   id: "clock",
   name: "Clock",
   description: "Current time and date",
-  defaultLayout: { w: 4, h: 2, minW: 2, minH: 2 },
+  defaultLayout: { w: 4, h: 2, minW: 2, minH: 1 },
   component: Clock,
 });
 
