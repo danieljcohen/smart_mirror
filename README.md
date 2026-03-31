@@ -12,7 +12,7 @@ uv sync
 ### 2. Run the server
 
 ```bash
-uv run --env-file .env app.py
+uv run app.py
 ```
 
 Runs on port 3000 by default.

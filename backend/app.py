@@ -4,16 +4,20 @@ import logging
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 import face_recognition
 import numpy as np
+from dotenv import load_dotenv
 from flask import Flask, Response, jsonify
 from flask_cors import CORS
 
 from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT
 from auth import auth_bp
 import face_store
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
 CORS(app)
