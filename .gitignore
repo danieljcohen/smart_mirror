@@ -1,5 +1,8 @@
 venv/
 .venv/
+*.lock
+package-lock.json
+pnpm-lock.yaml
 __pycache__/
 *.pyc
 encodings.pkl
