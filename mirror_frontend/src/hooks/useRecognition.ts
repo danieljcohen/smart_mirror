@@ -1,7 +1,9 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 const POLL_MS = 3_000;
-const GREETING_TIMEOUT_MS = 10_000;
+// Number of consecutive missed polls before clearing the recognized person.
+// At 3s per poll, 10 misses = 30 seconds of nobody detected before giving up.
+const MISS_THRESHOLD = 10;
 
 interface Face {
   name: string;
@@ -16,10 +18,10 @@ export function useRecognitionContext(): string[] {
 
 export function useRecognition() {
   const [names, setNames] = useState<string[]>([]);
+  const missCount = useRef(0);
+  const lastKnownRef = useRef<string>("");
 
   useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-
     async function poll() {
       try {
         const res = await fetch("/api/recognize");
@@ -33,10 +35,20 @@ export function useRecognition() {
               .map((f) => f.name),
           ),
         ];
+
         if (known.length) {
-          setNames(known);
-          clearTimeout(timeout);
-          timeout = setTimeout(() => setNames([]), GREETING_TIMEOUT_MS);
+          missCount.current = 0;
+          const primary = known.join(",");
+          if (primary !== lastKnownRef.current) {
+            lastKnownRef.current = primary;
+            setNames(known);
+          }
+        } else {
+          missCount.current++;
+          if (missCount.current >= MISS_THRESHOLD && lastKnownRef.current !== "") {
+            lastKnownRef.current = "";
+            setNames([]);
+          }
         }
       } catch (err) {
         console.warn("[recognize] backend unavailable:", err);
@@ -45,10 +57,7 @@ export function useRecognition() {
 
     poll();
     const id = setInterval(poll, POLL_MS);
-    return () => {
-      clearInterval(id);
-      clearTimeout(timeout);
-    };
+    return () => clearInterval(id);
   }, []);
 
   return names;

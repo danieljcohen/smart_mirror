@@ -40,11 +40,18 @@ export default function MirrorPage() {
   const namesRef = useRef<string[]>(names);
   useEffect(() => { namesRef.current = names; }, [names]);
 
+  const layoutJsonRef = useRef<string>("");
+
   const fetchLayout = (name: string) => {
     fetch(`/api/layout/${encodeURIComponent(name)}`)
       .then(r => r.json())
       .then(data => {
-        if (data.layout?.length) setLayout(normalizeLayout(data.layout));
+        if (!data.layout?.length) return;
+        const normalized = normalizeLayout(data.layout);
+        const json = JSON.stringify(normalized);
+        if (json === layoutJsonRef.current) return;
+        layoutJsonRef.current = json;
+        setLayout(normalized);
       })
       .catch(() => {});
   };

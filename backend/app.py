@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import base64
+
 import cv2
 import face_recognition
 import numpy as np
@@ -15,6 +17,7 @@ from flask_cors import CORS
 
 from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT
 from auth import auth_bp
+from gemini import gemini_bp
 import face_store
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -22,6 +25,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app = Flask(__name__)
 CORS(app)
 app.register_blueprint(auth_bp)
+app.register_blueprint(gemini_bp)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -193,12 +197,31 @@ def reload_faces():
     return jsonify({"status": "reloaded", "known_people": sorted(set(face_store.KNOWN_NAMES))})
 
 
+# ── Snapshot endpoint ────────────────────────────────────────────────
+
+@app.get("/snapshot")
+def snapshot():
+    """Return the current camera frame as a base64 JPEG data URL."""
+    cam = get_camera()
+    if not cam.is_open:
+        return jsonify({"error": "cannot open camera"}), 500
+
+    ok, frame = cam.read()
+    if not ok:
+        return jsonify({"error": "failed to capture frame"}), 500
+
+    _, buf = cv2.imencode(".jpg", frame)
+    b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+    return jsonify({"image": f"data:image/jpeg;base64,{b64}"})
+
+
 # ── Layout endpoints ────────────────────────────────────────────────
 
 AVAILABLE_WIDGETS = [
     {"id": "clock", "name": "Clock", "description": "Current time and date", "defaultLayout": {"w": 4, "h": 2, "minW": 2, "minH": 2}},
     {"id": "weather", "name": "Weather", "description": "Local weather conditions", "defaultLayout": {"w": 4, "h": 2, "minW": 3, "minH": 2}},
     {"id": "greeting", "name": "Greeting", "description": "Personalized greeting message", "defaultLayout": {"w": 6, "h": 2, "minW": 3, "minH": 2}},
+    {"id": "gemini-chat", "name": "Gemini Chat", "description": "AI chat with image support powered by Google Gemini", "defaultLayout": {"w": 4, "h": 4, "minW": 3, "minH": 3}},
 ]
 
 
