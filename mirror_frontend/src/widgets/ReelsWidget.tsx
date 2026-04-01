@@ -1,181 +1,136 @@
 import { useEffect, useRef, useState } from "react";
 import { registerWidget } from "./registry";
 
-const REFRESH_MS = 30 * 60 * 1_000; // refresh video list every 30 minutes
-let ytApiLoading = false;
-let ytApiReady = false;
-const ytApiCallbacks: (() => void)[] = [];
-
-function loadYouTubeApi(): Promise<void> {
-  return new Promise((resolve) => {
-    if (ytApiReady) { resolve(); return; }
-    ytApiCallbacks.push(resolve);
-    if (ytApiLoading) return;
-    ytApiLoading = true;
-
-    const prev = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      ytApiReady = true;
-      if (prev) prev();
-      ytApiCallbacks.forEach(cb => cb());
-      ytApiCallbacks.length = 0;
-    };
-
-    const script = document.createElement("script");
-    script.src = "https://www.youtube.com/iframe_api";
-    document.head.appendChild(script);
-  });
-}
+const REFRESH_MS = 30 * 60 * 1_000;
+// Shorts max length is 60s — advance after 65s as a hard fallback
+const FALLBACK_MS = 65_000;
 
 function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const sourceType = config?.source_type ?? "trending";
   const channelId = config?.channel_id ?? "";
   const searchQuery = config?.search_query ?? "";
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<YT.Player | null>(null);
+  const [videoIds, setVideoIds] = useState<string[]>([]);
+  const [idx, setIdx] = useState(0);
+  const [error, setError] = useState("");
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const videoIdsRef = useRef<string[]>([]);
-  const indexRef = useRef(0);
-  const playerDivId = useRef(`yt-player-${Math.random().toString(36).slice(2)}`);
 
-  const [status, setStatus] = useState<"loading" | "playing" | "error">("loading");
-  const [errorMsg, setErrorMsg] = useState("");
+  useEffect(() => { videoIdsRef.current = videoIds; }, [videoIds]);
 
-  async function fetchVideoIds(): Promise<string[]> {
-    const params = new URLSearchParams({ source_type: sourceType });
-    if (sourceType === "channel" && channelId) params.set("channel_id", channelId);
-    if (sourceType === "search" && searchQuery) params.set("search_query", searchQuery);
+  const advance = () =>
+    setIdx(i => (i + 1) % Math.max(videoIdsRef.current.length, 1));
 
-    const res = await fetch(`/api/youtube/shorts?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.status !== "OK") throw new Error(data.error ?? "API error");
-    return data.videoIds as string[];
-  }
-
-  function advanceVideo() {
-    const ids = videoIdsRef.current;
-    if (!ids.length || !playerRef.current) return;
-    indexRef.current = (indexRef.current + 1) % ids.length;
-    playerRef.current.loadVideoById(ids[indexRef.current]);
-  }
-
-  function createPlayer(videoId: string) {
-    if (playerRef.current) {
-      playerRef.current.destroy();
-      playerRef.current = null;
-    }
-
-    // Re-create the target div (destroyed on player.destroy())
-    const container = containerRef.current;
-    if (!container) return;
-    let div = document.getElementById(playerDivId.current);
-    if (!div) {
-      div = document.createElement("div");
-      div.id = playerDivId.current;
-      container.appendChild(div);
-    }
-
-    playerRef.current = new window.YT.Player(playerDivId.current, {
-      videoId,
-      width: "100%",
-      height: "100%",
-      playerVars: {
-        autoplay: 1,
-        controls: 0,
-        rel: 0,
-        modestbranding: 1,
-        playsinline: 1,
-        fs: 0,
-      },
-      events: {
-        onStateChange: (event: YT.OnStateChangeEvent) => {
-          if (event.data === window.YT.PlayerState.ENDED) {
-            advanceVideo();
+  // Listen for YouTube postMessage events
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.origin !== "https://www.youtube.com") return;
+      try {
+        const d = JSON.parse(typeof e.data === "string" ? e.data : "{}");
+        if (d.event === "onStateChange") {
+          if (d.info === 1) {
+            // Video started playing — unmute now
+            iframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({ event: "command", func: "unMute", args: [] }), "*",
+            );
+            iframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({ event: "command", func: "setVolume", args: [100] }), "*",
+            );
           }
-        },
-        onError: () => {
-          // Skip errored video
-          advanceVideo();
-        },
-        onReady: () => {
-          setStatus("playing");
-        },
-      },
-    });
-  }
+          if (d.info === 0) {
+            // Video ended — go to next
+            advance();
+          }
+        }
+      } catch { /* ignore malformed messages */ }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Fallback timer — advance even if the end event never fires
+  useEffect(() => {
+    if (!videoIds.length) return;
+    const t = setTimeout(advance, FALLBACK_MS);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx, videoIds.length]);
+
+  // Subscribe to iframe events after load so postMessage state changes work
+  const onIframeLoad = () => {
+    iframeRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ event: "listening", id: "yt-reels" }), "*",
+    );
+  };
+
+  // Fetch video IDs from backend proxy
   useEffect(() => {
     let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval>;
-
-    async function init() {
+    const fetchIds = async () => {
       try {
-        const ids = await fetchVideoIds();
+        const p = new URLSearchParams({ source_type: sourceType });
+        if (sourceType === "channel" && channelId) p.set("channel_id", channelId);
+        if (sourceType === "search" && searchQuery) p.set("search_query", searchQuery);
+        const res = await fetch(`/api/youtube/shorts?${p}`);
+        const data = await res.json();
         if (cancelled) return;
-        if (!ids.length) { setErrorMsg("No videos found"); setStatus("error"); return; }
-
-        videoIdsRef.current = ids;
-        indexRef.current = 0;
-
-        await loadYouTubeApi();
-        if (cancelled) return;
-
-        createPlayer(ids[0]);
-
-        // Refresh the video list periodically without interrupting playback
-        intervalId = setInterval(async () => {
-          try {
-            const fresh = await fetchVideoIds();
-            if (fresh.length) videoIdsRef.current = fresh;
-          } catch { /* keep existing list */ }
-        }, REFRESH_MS);
+        if (data.status === "OK" && data.videoIds?.length) {
+          setVideoIds(data.videoIds);
+          setIdx(0);
+          setError("");
+        } else {
+          setError(data.error ?? "No videos found");
+        }
       } catch (e) {
-        if (!cancelled) { setErrorMsg(String(e)); setStatus("error"); }
-      }
-    }
-
-    init();
-
-    return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-      if (playerRef.current) {
-        try { playerRef.current.destroy(); } catch { /* ignore */ }
-        playerRef.current = null;
+        if (!cancelled) setError(String(e));
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchIds();
+    const rid = setInterval(fetchIds, REFRESH_MS);
+    return () => { cancelled = true; clearInterval(rid); };
   }, [sourceType, channelId, searchQuery]);
 
-  if (status === "error") {
+  if (error) {
     return (
       <div
         className="flex h-full items-center justify-center text-center text-white/30 px-2"
         style={{ fontSize: "9cqmin" }}
       >
-        {errorMsg || "Could not load videos"}
+        {error}
       </div>
     );
   }
 
-  return (
-    <div className="relative h-full w-full overflow-hidden bg-black">
-      {status === "loading" && (
-        <div
-          className="absolute inset-0 flex items-center justify-center text-white/30"
-          style={{ fontSize: "9cqmin" }}
-        >
-          Loading…
-        </div>
-      )}
-      {/* Player mounts here; the YT IFrame API will populate this div */}
+  if (!videoIds.length) {
+    return (
       <div
-        ref={containerRef}
-        className="h-full w-full [&>div]:h-full [&>div]:w-full [&_iframe]:h-full [&_iframe]:w-full"
+        className="flex h-full items-center justify-center text-white/30"
+        style={{ fontSize: "9cqmin" }}
       >
-        <div id={playerDivId.current} />
+        Loading…
       </div>
+    );
+  }
+
+  const videoId = videoIds[idx];
+  const src =
+    `https://www.youtube.com/embed/${videoId}` +
+    `?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1` +
+    `&playsinline=1&enablejsapi=1&fs=0`;
+
+  return (
+    <div className="h-full w-full overflow-hidden bg-black">
+      {/* key={videoId} forces React to remount the iframe for each new video */}
+      <iframe
+        key={videoId}
+        ref={iframeRef}
+        src={src}
+        className="h-full w-full border-0"
+        allow="autoplay; encrypted-media; gyroscope; picture-in-picture"
+        onLoad={onIframeLoad}
+      />
     </div>
   );
 }
