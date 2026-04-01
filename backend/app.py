@@ -31,6 +31,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
 DETECTION_MODEL = os.getenv("DETECTION_MODEL", "hog")  # "hog" is faster on Pi, "cnn" is more accurate
 TOLERANCE = float(os.getenv("TOLERANCE", "0.6"))
@@ -389,6 +390,53 @@ def proxy_geocode():
                 "display_name": hit.get("display_name", ""),
             }],
         })
+    except Exception as e:
+        return jsonify({"status": "ERROR", "error": str(e)}), 502
+
+
+@app.get("/youtube/shorts")
+def proxy_youtube_shorts():
+    if not YOUTUBE_API_KEY:
+        return jsonify({"status": "ERROR", "error": "YOUTUBE_API_KEY not configured"}), 500
+
+    source_type = request.args.get("source_type", "trending")
+    channel_id = request.args.get("channel_id", "").strip()
+    search_query = request.args.get("search_query", "").strip()
+
+    # Extract channel ID from a full YouTube URL or @handle if provided
+    if channel_id.startswith("http"):
+        # e.g. https://www.youtube.com/@handle or /channel/UCxxx
+        parts = [p for p in channel_id.rstrip("/").split("/") if p]
+        channel_id = parts[-1] if parts else channel_id
+
+    params: dict = {
+        "part": "snippet",
+        "type": "video",
+        "videoDuration": "short",
+        "maxResults": 15,
+        "key": YOUTUBE_API_KEY,
+    }
+
+    if source_type == "channel" and channel_id:
+        params["channelId"] = channel_id
+        params["q"] = "#shorts"
+    elif source_type == "search" and search_query:
+        params["q"] = f"{search_query} #shorts"
+    else:
+        params["q"] = "#shorts"
+
+    try:
+        resp = http_requests.get(
+            "https://www.googleapis.com/youtube/v3/search",
+            params=params,
+            timeout=10,
+        )
+        data = resp.json()
+        if "error" in data:
+            return jsonify({"status": "ERROR", "error": data["error"].get("message", "YouTube API error")}), 502
+        items = data.get("items", [])
+        video_ids = [i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId")]
+        return jsonify({"status": "OK", "videoIds": video_ids})
     except Exception as e:
         return jsonify({"status": "ERROR", "error": str(e)}), 502
 

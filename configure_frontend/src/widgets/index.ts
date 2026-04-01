@@ -3,6 +3,7 @@ import "./WeatherWidget";
 import "./GreetingWidget";
 import "./GeminiChatWidget";
 import "./TransitWidget";
+import "./ReelsWidget";
 
 export { default as registry, getAllWidgets, getWidget } from "./registry";
 export type { WidgetDefinition } from "./registry";
