@@ -9,6 +9,7 @@ interface LayoutItem {
   y: number;  // 0–100 percent of screen height
   w: number;  // percent of screen width
   h: number;  // percent of screen height
+  config?: Record<string, string>;
 }
 
 // Migrate old grid-coord layout (w≤12, h≤8) to percent
@@ -88,7 +89,7 @@ export default function MirrorPage() {
               containerType: "size",
             }}
           >
-            <WidgetRenderer widgetId={item.widgetId} />
+            <WidgetRenderer widgetId={item.widgetId} config={item.config} />
           </div>
         ))}
       </div>

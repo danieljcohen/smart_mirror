@@ -37,7 +37,7 @@ function trimImagesForPayload(messages: ChatMessage[]): ChatMessage[] {
   });
 }
 
-function GeminiChat() {
+function GeminiChat(_: { config?: Record<string, string> }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [phase, setPhase] = useState<"waiting" | "listening" | "processing">("waiting");
   const [interimText, setInterimText] = useState("");

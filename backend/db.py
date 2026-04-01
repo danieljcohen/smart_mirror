@@ -90,3 +90,16 @@ def save_encoding(user_id: int, encoding_list: list[float]) -> None:
     sb.table("face_encodings").insert(
         {"user_id": user_id, "encoding": encoding_list}
     ).execute()
+
+
+def get_global_setting(key: str) -> str | None:
+    """Return a value from the global settings table, or None if not set."""
+    sb = get_supabase()
+    result = sb.table("settings").select("value").eq("key", key).execute()
+    return result.data[0]["value"] if result.data else None
+
+
+def set_global_setting(key: str, value: str) -> None:
+    """Upsert a key/value pair in the global settings table."""
+    sb = get_supabase()
+    sb.table("settings").upsert({"key": key, "value": value}, on_conflict="key").execute()

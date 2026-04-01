@@ -1,6 +1,6 @@
 import { registerWidget } from "./registry";
 
-function WeatherPreview() {
+function WeatherPreview(_: { config?: Record<string, string> }) {
   return (
     <div className="flex h-full items-center justify-center" style={{ gap: "4cqmin" }}>
       <span style={{ fontSize: "20cqmin" }}>☀️</span>

@@ -1,6 +1,11 @@
 import { getWidget } from "../widgets";
 
-export function WidgetRenderer({ widgetId }: { widgetId: string }) {
+interface WidgetRendererProps {
+  widgetId: string;
+  config?: Record<string, string>;
+}
+
+export function WidgetRenderer({ widgetId, config }: WidgetRendererProps) {
   const def = getWidget(widgetId);
   if (!def) {
     return (
@@ -10,5 +15,5 @@ export function WidgetRenderer({ widgetId }: { widgetId: string }) {
     );
   }
   const Component = def.component;
-  return <Component />;
+  return <Component config={config} />;
 }

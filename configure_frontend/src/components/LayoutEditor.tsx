@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getAllWidgets, getWidget } from "../widgets";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { type LayoutItem, getUser, loadLayout, saveLayout } from "../db/layout";
+import { getMirrorLocation, setMirrorLocation } from "../db/settings";
+import { AddressInput } from "./AddressInput";
 
 const ASPECT = 16 / 9;
 const MIN_W = 8;
@@ -31,27 +33,33 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
+  // Mirror-wide location
+  const [mirrorLocation, setMirrorLocationState] = useState("");
+  const [locationSaving, setLocationSaving] = useState(false);
+  const [locationMsg, setLocationMsg] = useState("");
+
+  // Which widget is open in the config panel
+  const [configPanelId, setConfigPanelId] = useState<string | null>(null);
+  // Mirror settings modal
+  const [mirrorSettingsOpen, setMirrorSettingsOpen] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  // Track unsaved changes so we don't prompt unnecessarily
   const dirtyRef = useRef(false);
 
-  // On mount: create/look up user in Supabase, then load their layout
+  // On mount: load user + layout + mirror location
   useEffect(() => {
     let cancelled = false;
     async function init() {
       setLoading(true);
       try {
-        const uid = await getUser(userName);
-        if (uid === null) {
-          // User was removed from DB — kick back to login
-          onLogout();
-          return;
-        }
+        const [uid, loc] = await Promise.all([getUser(userName), getMirrorLocation()]);
+        if (uid === null) { onLogout(); return; }
         const remote = await loadLayout(uid, userName);
         if (!cancelled) {
           setUserId(uid);
           setLayout(remote);
+          setMirrorLocationState(loc);
         }
       } catch (err) {
         console.error("[LayoutEditor] init error:", err);
@@ -135,6 +143,18 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
 
   const removeWidget = useCallback((widgetId: string) => {
     setLayout(prev => prev.filter(i => i.widgetId !== widgetId));
+    if (configPanelId === widgetId) setConfigPanelId(null);
+    dirtyRef.current = true;
+  }, [configPanelId]);
+
+  const updateWidgetConfig = useCallback((widgetId: string, key: string, value: string) => {
+    setLayout(prev =>
+      prev.map(item =>
+        item.widgetId === widgetId
+          ? { ...item, config: { ...(item.config ?? {}), [key]: value } }
+          : item
+      )
+    );
     dirtyRef.current = true;
   }, []);
 
@@ -142,12 +162,8 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     setSaving(true);
     setSaveMsg("");
     try {
-      // Always re-fetch the userId to avoid stale state causing FK violations
       const freshId = await getUser(userName);
-      if (!freshId) {
-        onLogout(); // User no longer exists in DB
-        return;
-      }
+      if (!freshId) { onLogout(); return; }
       setUserId(freshId);
       await saveLayout(freshId, userName, layout);
       setSaveMsg("Saved!");
@@ -160,8 +176,25 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     }
   };
 
+  const handleSaveMirrorLocation = async () => {
+    setLocationSaving(true);
+    setLocationMsg("");
+    try {
+      await setMirrorLocation(mirrorLocation.trim());
+      setLocationMsg("Saved!");
+    } catch (err) {
+      setLocationMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setLocationSaving(false);
+      setTimeout(() => setLocationMsg(""), 3000);
+    }
+  };
+
   const allWidgets = getAllWidgets();
   const activeIds = new Set(layout.map(i => i.widgetId));
+
+  const configPanelWidget = configPanelId ? getWidget(configPanelId) : null;
+  const configPanelItem = configPanelId ? layout.find(i => i.widgetId === configPanelId) : null;
 
   if (loading) {
     return (
@@ -191,6 +224,15 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-500 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={() => setMirrorSettingsOpen(true)}
+              title="Mirror Settings"
+              className="rounded-lg bg-zinc-800 p-2 text-zinc-400 transition hover:bg-zinc-700 hover:text-white"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                <path fillRule="evenodd" d="M7.84 1.804A1 1 0 0 1 8.82 1h2.36a1 1 0 0 1 .98.804l.331 1.652a6.993 6.993 0 0 1 1.929 1.115l1.598-.54a1 1 0 0 1 1.186.447l1.18 2.044a1 1 0 0 1-.205 1.251l-1.267 1.113a7.047 7.047 0 0 1 0 2.228l1.267 1.113a1 1 0 0 1 .205 1.251l-1.18 2.044a1 1 0 0 1-1.186.447l-1.598-.54a6.993 6.993 0 0 1-1.929 1.115l-.33 1.652a1 1 0 0 1-.98.804H8.82a1 1 0 0 1-.98-.804l-.331-1.652a6.993 6.993 0 0 1-1.929-1.115l-1.598.54a1 1 0 0 1-1.186-.447l-1.18-2.044a1 1 0 0 1 .205-1.251l1.267-1.113a7.048 7.048 0 0 1 0-2.228L1.821 7.773a1 1 0 0 1-.205-1.251l1.18-2.044a1 1 0 0 1 1.186-.447l1.598.54A6.992 6.992 0 0 1 7.51 3.456l.33-1.652ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" clipRule="evenodd" />
+              </svg>
             </button>
             <button
               onClick={onRegister}
@@ -241,7 +283,7 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
                 ✕
               </button>
               <div className="h-full w-full overflow-hidden rounded-xl p-2">
-                <WidgetRenderer widgetId={item.widgetId} />
+                <WidgetRenderer widgetId={item.widgetId} config={item.config} />
               </div>
               <div
                 className="absolute bottom-0 right-0 z-20 h-7 w-7 cursor-se-resize"
@@ -261,25 +303,147 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
           <div className="flex flex-wrap gap-3">
             {allWidgets.map(w => {
               const active = activeIds.has(w.id);
+              const hasConfig = active && (w.configFields?.length ?? 0) > 0;
+              const isConfigOpen = configPanelId === w.id;
               return (
-                <button
-                  key={w.id}
-                  onClick={() => active ? removeWidget(w.id) : addWidget(w.id)}
-                  className={`rounded-xl border px-5 py-3 text-left transition ${
-                    active
-                      ? "border-blue-500/50 bg-blue-500/10 text-white"
-                      : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700"
-                  }`}
-                >
-                  <div className="font-medium">{w.name}</div>
-                  <div className="mt-0.5 text-xs text-zinc-500">{w.description}</div>
-                  <div className="mt-1 text-xs text-zinc-600">{active ? "Click to remove" : "Click to add"}</div>
-                </button>
+                <div key={w.id} className="flex flex-col gap-0">
+                  <div className="flex items-stretch gap-px">
+                    <button
+                      onClick={() => active ? removeWidget(w.id) : addWidget(w.id)}
+                      className={`rounded-xl border px-5 py-3 text-left transition ${
+                        hasConfig ? "rounded-r-none border-r-0" : ""
+                      } ${
+                        active
+                          ? "border-blue-500/50 bg-blue-500/10 text-white"
+                          : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700"
+                      }`}
+                    >
+                      <div className="font-medium">{w.name}</div>
+                      <div className="mt-0.5 text-xs text-zinc-500">{w.description}</div>
+                      <div className="mt-1 text-xs text-zinc-600">{active ? "Click to remove" : "Click to add"}</div>
+                    </button>
+                    {hasConfig && (
+                      <button
+                        onClick={() => setConfigPanelId(isConfigOpen ? null : w.id)}
+                        className={`rounded-r-xl border px-3 text-zinc-400 transition hover:text-white ${
+                          isConfigOpen
+                            ? "border-blue-500/50 bg-blue-500/20 text-blue-300"
+                            : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
+                        }`}
+                        title="Configure widget"
+                      >
+                        ⚙
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Inline config panel */}
+                  {isConfigOpen && configPanelWidget?.configFields && configPanelItem && (
+                    <div className="mt-1 rounded-xl border border-zinc-700 bg-zinc-900 p-4 space-y-3">
+                      <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+                        {configPanelWidget.name} Settings
+                      </p>
+                      {configPanelWidget.configFields.map(field => (
+                        <div key={field.key} className="space-y-1">
+                          <label className="block text-xs text-zinc-400">{field.label}</label>
+                          {field.type === "select" ? (
+                            <select
+                              value={configPanelItem.config?.[field.key] ?? ""}
+                              onChange={e => updateWidgetConfig(w.id, field.key, e.target.value)}
+                              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                            >
+                              <option value="">— select —</option>
+                              {field.options?.map(opt => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                            </select>
+                          ) : field.type === "address" ? (
+                            <AddressInput
+                              value={configPanelItem.config?.[field.key] ?? ""}
+                              onChange={val => updateWidgetConfig(w.id, field.key, val)}
+                              placeholder={field.placeholder}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={configPanelItem.config?.[field.key] ?? ""}
+                              onChange={e => updateWidgetConfig(w.id, field.key, e.target.value)}
+                              placeholder={field.placeholder}
+                              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-blue-500"
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
         </div>
+
       </div>
+
+      {/* Mirror Settings modal */}
+      {mirrorSettingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={e => { if (e.target === e.currentTarget) setMirrorSettingsOpen(false); }}
+        >
+          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl space-y-5 mx-4">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-light text-white">Mirror Settings</h2>
+              <button
+                onClick={() => setMirrorSettingsOpen(false)}
+                className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Mirror Location */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-zinc-300">Mirror Location</label>
+              <p className="text-xs text-zinc-500">
+                The address where this mirror is installed. Used as the origin for the Transit widget and for weather.
+              </p>
+              <AddressInput
+                value={mirrorLocation}
+                onChange={setMirrorLocationState}
+                placeholder="e.g. 350 5th Ave, New York, NY 10118"
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-1">
+              {locationMsg && (
+                <span className={`text-sm ${locationMsg === "Saved!" ? "text-green-400" : "text-red-400"}`}>
+                  {locationMsg}
+                </span>
+              )}
+              <div className="ml-auto flex gap-2">
+                <button
+                  onClick={() => setMirrorSettingsOpen(false)}
+                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    await handleSaveMirrorLocation();
+                    setTimeout(() => setMirrorSettingsOpen(false), 800);
+                  }}
+                  disabled={locationSaving}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {locationSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

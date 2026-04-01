@@ -7,7 +7,7 @@ function formatNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 
-function Greeting() {
+function Greeting(_: { config?: Record<string, string> }) {
   const names = useRecognitionContext();
 
   if (!names.length) {

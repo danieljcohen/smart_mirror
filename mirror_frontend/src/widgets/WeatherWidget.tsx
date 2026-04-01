@@ -1,7 +1,7 @@
 import { registerWidget } from "./registry";
 import { useWeather } from "../hooks/useWeather";
 
-function Weather() {
+function Weather(_: { config?: Record<string, string> }) {
   const weather = useWeather();
 
   if (!weather) {

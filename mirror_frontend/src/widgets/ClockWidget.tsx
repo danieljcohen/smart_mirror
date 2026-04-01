@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { registerWidget } from "./registry";
 
-function Clock() {
+function Clock(_: { config?: Record<string, string> }) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {

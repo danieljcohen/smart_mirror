@@ -1,6 +1,6 @@
 import { registerWidget } from "./registry";
 
-function GeminiChatPreview() {
+function GeminiChatPreview(_: { config?: Record<string, string> }) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-white/5">
       <div className="flex-1 space-y-2 p-3">

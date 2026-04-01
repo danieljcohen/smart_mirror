@@ -12,10 +12,11 @@ import cv2
 import face_recognition
 import numpy as np
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
-from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT
+import requests as http_requests
+from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT, get_global_setting
 from auth import auth_bp
 from gemini import gemini_bp
 import face_store
@@ -28,6 +29,8 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(gemini_bp)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 
 DETECTION_MODEL = os.getenv("DETECTION_MODEL", "hog")  # "hog" is faster on Pi, "cnn" is more accurate
 TOLERANCE = float(os.getenv("TOLERANCE", "0.6"))
@@ -228,6 +231,166 @@ AVAILABLE_WIDGETS = [
 @app.get("/widgets")
 def list_widgets():
     return jsonify(AVAILABLE_WIDGETS)
+
+
+@app.get("/settings")
+def get_settings():
+    """Return global settings (e.g. mirror_location) from Supabase."""
+    mirror_location = get_global_setting("mirror_location") or ""
+    return jsonify({"mirror_location": mirror_location})
+
+
+@app.get("/directions")
+def proxy_directions():
+    """
+    Proxy to Google Routes API (v2).
+    Query params: origin, destination, mode (transit|walking|driving)
+    Returns: { status, duration, distance, transitLines }
+    """
+    if not GOOGLE_MAPS_API_KEY:
+        return jsonify({"status": "ERROR", "error": "GOOGLE_MAPS_API_KEY not configured"}), 500
+
+    origin = request.args.get("origin", "")
+    destination = request.args.get("destination", "")
+    mode_raw = request.args.get("mode", "transit").lower()
+
+    mode_map = {"transit": "TRANSIT", "walking": "WALK", "driving": "DRIVE"}
+    travel_mode = mode_map.get(mode_raw, "TRANSIT")
+
+    body = {
+        "origin": {"address": origin},
+        "destination": {"address": destination},
+        "travelMode": travel_mode,
+        "computeAlternativeRoutes": False,
+    }
+    # transitDetails lives one level deeper — must be requested explicitly
+    field_mask = "routes.legs.steps.transitDetails,routes.localizedValues"
+
+    try:
+        resp = http_requests.post(
+            "https://routes.googleapis.com/directions/v2:computeRoutes",
+            json=body,
+            headers={
+                "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                "X-Goog-FieldMask": field_mask,
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+        data = resp.json()
+
+        if not data.get("routes"):
+            return jsonify({"status": "ZERO_RESULTS"})
+
+        route = data["routes"][0]
+        localized = route.get("localizedValues", {})
+        duration_text = localized.get("duration", {}).get("text", "")
+        distance_text = localized.get("distance", {}).get("text", "")
+
+        # Collect unique transit line badges from all steps.
+        # Routes API v2 uses "transitLine" (not "line") and nameShort is e.g. "L Line".
+        transit_lines = []
+        seen_lines: set[str] = set()
+        for leg in route.get("legs", []):
+            for step in leg.get("steps", []):
+                td = step.get("transitDetails", {})
+                tl = td.get("transitLine", {})
+                if not tl:
+                    continue
+                # "L Line" → "L", "Q Line" → "Q", "Red Line" → "Red"
+                raw = tl.get("nameShort") or tl.get("name", "")
+                import re as _re
+                short_name = _re.sub(r"\s+(Line|Train|Bus|Metro|Express|Local).*$",
+                                     "", raw, flags=_re.IGNORECASE).strip()
+                if not short_name or short_name in seen_lines:
+                    continue
+                seen_lines.add(short_name)
+
+                # Departure time (localized, e.g. "11:08 AM") + headway for next trains
+                dep_text = (td.get("localizedValues", {})
+                              .get("departureTime", {})
+                              .get("time", {})
+                              .get("text", ""))
+                headway_raw = td.get("headway", "") or td.get("headwaySeconds", "")
+                headway_s = 0
+                if isinstance(headway_raw, str) and headway_raw.endswith("s"):
+                    headway_s = int(headway_raw[:-1])
+                elif isinstance(headway_raw, int):
+                    headway_s = headway_raw
+
+                # Build list of upcoming departure times (up to 3)
+                dep_times: list[str] = []
+                if dep_text:
+                    dep_times.append(dep_text)
+                    if headway_s > 0:
+                        dep_ts = td.get("stopDetails", {}).get("departureTime", "")
+                        tz_name = (td.get("localizedValues", {})
+                                     .get("departureTime", {})
+                                     .get("timeZone", "UTC"))
+                        if dep_ts:
+                            from datetime import datetime, timedelta
+                            from zoneinfo import ZoneInfo
+                            base = datetime.fromisoformat(dep_ts.replace("Z", "+00:00"))
+                            try:
+                                tz = ZoneInfo(tz_name)
+                            except Exception:
+                                tz = ZoneInfo("UTC")
+                            for i in range(1, 3):
+                                nxt = (base + timedelta(seconds=headway_s * i)).astimezone(tz)
+                                ampm = "AM" if nxt.hour < 12 else "PM"
+                                h12 = nxt.hour % 12 or 12
+                                dep_times.append(f"{h12}:{nxt.minute:02d}\u202f{ampm}")
+
+                transit_lines.append({
+                    "shortName": short_name,
+                    "color": tl.get("color", "#555555"),
+                    "textColor": tl.get("textColor", "#ffffff"),
+                    "vehicleType": tl.get("vehicle", {}).get("type", ""),
+                    "departureTimes": dep_times,
+                })
+
+        return jsonify({
+            "status": "OK",
+            "duration": duration_text,
+            "distance": distance_text,
+            "transitLines": transit_lines,
+        })
+    except Exception as e:
+        return jsonify({"status": "ERROR", "error": str(e)}), 502
+
+
+@app.get("/geocode")
+def proxy_geocode():
+    """
+    Geocode an address using Nominatim (OpenStreetMap) — no API key required.
+    Query param: address
+    Returns: { status, results: [{ geometry: { location: { lat, lng } } }] }
+    """
+    address = request.args.get("address", "").strip()
+    if not address:
+        return jsonify({"status": "INVALID_REQUEST", "results": []}), 400
+    try:
+        resp = http_requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": address, "format": "json", "limit": 1},
+            headers={"User-Agent": "SmartMirror/1.0"},
+            timeout=10,
+        )
+        results = resp.json()
+        if not results:
+            return jsonify({"status": "ZERO_RESULTS", "results": []})
+        hit = results[0]
+        return jsonify({
+            "status": "OK",
+            "results": [{
+                "geometry": {
+                    "location": {"lat": float(hit["lat"]), "lng": float(hit["lon"])}
+                },
+                "display_name": hit.get("display_name", ""),
+            }],
+        })
+    except Exception as e:
+        return jsonify({"status": "ERROR", "error": str(e)}), 502
 
 
 @app.get("/layout/<name>")
