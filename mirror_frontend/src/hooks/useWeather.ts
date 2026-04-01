@@ -6,12 +6,12 @@ interface Weather {
   icon: string;
 }
 
-interface Coords {
+export interface Coords {
   latitude: number;
   longitude: number;
 }
 
-function weatherLabel(code: number): string {
+export function weatherLabel(code: number): string {
   if (code === 0) return "Clear";
   if (code <= 3) return "Cloudy";
   if (code <= 48) return "Foggy";
@@ -22,7 +22,7 @@ function weatherLabel(code: number): string {
   return "Stormy";
 }
 
-function weatherIcon(code: number): string {
+export function weatherIcon(code: number): string {
   if (code === 0) return "☀️";
   if (code <= 3) return "☁️";
   if (code <= 48) return "🌫️";
@@ -62,7 +62,7 @@ function getBrowserCoords(): Promise<Coords> {
  *  2. Browser geolocation
  *  3. IP-based geolocation (ipapi.co)
  */
-async function resolveCoords(): Promise<Coords> {
+export async function resolveCoords(): Promise<Coords> {
   // 1. Mirror location
   try {
     const settingsRes = await fetch("/api/settings");
