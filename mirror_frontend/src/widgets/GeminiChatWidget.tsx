@@ -128,7 +128,7 @@ function GeminiChat(_: { config?: Record<string, string> }) {
           }
         }
 
-        if (interim) setInterimText(interim);
+        if (interim && phaseRef.current === "listening") setInterimText(interim);
 
         if (final_) {
           setInterimText("");
