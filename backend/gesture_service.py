@@ -96,23 +96,12 @@ def gesture_monitor_loop(get_camera_func):
                 for t, y in reversed(history[:-1]):
                     if current_t - t > 0.3:
                         break
-                    
                     if (y - current_y) > 0.05:
                         _broadcast_gesture({
                             "type": "flick_up",
                             "timestamp": now
                         })
                         logger.info("Flick up detected!")
-                        history.clear()
-                        # Cooldown to prevent double-scrolls
-                        time.sleep(0.8)
-                        break
-                    elif (current_y - y) > 0.05:
-                        _broadcast_gesture({
-                            "type": "flick_down",
-                            "timestamp": now
-                        })
-                        logger.info("Flick down detected!")
                         history.clear()
                         # Cooldown to prevent double-scrolls
                         time.sleep(0.8)
