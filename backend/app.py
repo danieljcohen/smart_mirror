@@ -20,6 +20,7 @@ from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, 
 from auth import auth_bp
 from gemini import gemini_bp
 import face_store
+import gesture_service
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -199,6 +200,31 @@ def reload_faces():
     """Reload face encodings from Supabase."""
     face_store.load_known_faces()
     return jsonify({"status": "reloaded", "known_people": sorted(set(face_store.KNOWN_NAMES))})
+
+
+import json
+
+@app.get("/gesture_stream")
+def gesture_stream():
+    """Server-Sent Events endpoint for gestures."""
+    def stream():
+        q = gesture_service.subscribe()
+        try:
+            while True:
+                gesture = q.get()  # Block until gesture available
+                yield f"data: {json.dumps(gesture)}\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            gesture_service.unsubscribe(q)
+            
+    return Response(stream(), mimetype="text/event-stream")
+
+@app.get("/gesture")
+def get_gesture():
+    """Return the most recently detected gesture (if any)."""
+    gesture = gesture_service.get_latest_gesture()
+    return jsonify(gesture if gesture else {})
 
 
 # ── Snapshot endpoint ────────────────────────────────────────────────
@@ -640,5 +666,10 @@ if __name__ == "__main__":
     # Refresh encodings from Supabase in the background
     t = threading.Thread(target=_encoding_poll_loop, daemon=True)
     t.start()
+    
+    # Start gesture monitoring
+    gt = threading.Thread(target=gesture_service.gesture_monitor_loop, args=(get_camera,), daemon=True)
+    gt.start()
+    
     get_camera()
     app.run(host="0.0.0.0", port=3000, debug=False)
