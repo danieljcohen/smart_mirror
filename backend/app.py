@@ -529,6 +529,63 @@ def proxy_news_headlines():
         return jsonify({"status": "ERROR", "error": str(e)}), 502
 
 
+_sports_cache: dict = {}
+_SPORTS_CACHE_TTL = 5 * 60  # 5 minutes — short enough to catch live score changes
+
+SPORTS_LEAGUES = {
+    "nfl":  ("NFL",     "football/nfl"),
+    "nba":  ("NBA",     "basketball/nba"),
+    "nhl":  ("NHL",     "hockey/nhl"),
+    "mlb":  ("MLB",     "baseball/mlb"),
+    "epl":  ("Premier League", "soccer/eng.1"),
+    "mls":  ("MLS",     "soccer/usa.1"),
+}
+
+
+@app.get("/sports/scores")
+def proxy_sports_scores():
+    league = request.args.get("league", "nfl").lower()
+    label, path = SPORTS_LEAGUES.get(league, SPORTS_LEAGUES["nfl"])
+
+    cached = _sports_cache.get(league)
+    if cached and (time.time() - cached["ts"] < _SPORTS_CACHE_TTL):
+        return jsonify({"status": "OK", "games": cached["games"], "league": label, "cached": True})
+
+    url = f"https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"
+    try:
+        resp = http_requests.get(url, headers={"User-Agent": "SmartMirror/1.0"}, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+
+        games = []
+        for event in data.get("events", []):
+            comp = (event.get("competitions") or [{}])[0]
+            competitors = comp.get("competitors", [])
+            status_obj = event.get("status", {})
+            status_type = status_obj.get("type", {})
+            status_detail = status_type.get("shortDetail", "")
+            status_state  = status_type.get("state", "pre")  # pre / in / post
+
+            home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+            away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+            if not home or not away:
+                continue
+
+            games.append({
+                "homeTeam":  home["team"].get("abbreviation", ""),
+                "awayTeam":  away["team"].get("abbreviation", ""),
+                "homeScore": home.get("score", ""),
+                "awayScore": away.get("score", ""),
+                "status":    status_detail,
+                "state":     status_state,   # "pre" | "in" | "post"
+            })
+
+        _sports_cache[league] = {"games": games, "ts": time.time()}
+        return jsonify({"status": "OK", "games": games, "league": label})
+    except Exception as e:
+        return jsonify({"status": "ERROR", "error": str(e)}), 502
+
+
 @app.get("/layout/<name>")
 def get_layout_by_name(name: str):
     """Public endpoint used by the mirror display to fetch a user's layout."""
