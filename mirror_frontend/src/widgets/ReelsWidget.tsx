@@ -21,6 +21,12 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
 
   const advance = () =>
     setIdx(i => (i + 1) % Math.max(videoIdsRef.current.length, 1));
+    
+  const goBack = () =>
+    setIdx(i => {
+      const len = Math.max(videoIdsRef.current.length, 1);
+      return (i - 1 + len) % len;
+    });
 
   // Listen for YouTube postMessage events
   useEffect(() => {
@@ -57,6 +63,30 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, videoIds.length]);
+
+  // Listen for gesture events from backend
+  useEffect(() => {
+    const eventSource = new EventSource("/api/gesture_stream");
+
+    eventSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "flick_up") {
+          advance();
+        } else if (data.type === "flick_down") {
+          goBack();
+        }
+      } catch (err) {
+        // silently ignore parse errors
+      }
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   // Subscribe to iframe events after load so postMessage state changes work
   const onIframeLoad = () => {
@@ -117,7 +147,7 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const videoId = videoIds[idx];
   const src =
     `https://www.youtube.com/embed/${videoId}` +
-    `?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1` +
+    `?autoplay=1&mute=0&controls=0&rel=0&modestbranding=1` +
     `&playsinline=1&enablejsapi=1&fs=0`;
 
   return (
