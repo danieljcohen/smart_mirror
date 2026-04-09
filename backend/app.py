@@ -44,26 +44,57 @@ ENCODING_POLL_INTERVAL = int(os.getenv("ENCODING_POLL_INTERVAL", "300"))  # seco
 # ── Persistent camera ──────────────────────────────────────────────
 
 class Camera:
-    """Thread-safe wrapper that keeps the webcam open for the lifetime of the process."""
+    """Thread-safe wrapper that keeps the camera open for the lifetime of the process."""
 
     def __init__(self, index: int = 0):
-        self._cap = cv2.VideoCapture(index)
         self._lock = threading.Lock()
-        if not self._cap.isOpened():
-            logger.error("Cannot open camera %d", index)
+        self._picam = None
+        self._cap = None
+
+        # Try picamera2 first (Pi Camera 3 on libcamera stack)
+        try:
+            from picamera2 import Picamera2
+            self._picam = Picamera2()
+            config = self._picam.create_video_configuration(
+                main={"size": (640, 480), "format": "RGB888"}
+            )
+            self._picam.configure(config)
+            self._picam.start()
+            logger.info("Using picamera2 (Pi Camera)")
+        except Exception as e:
+            logger.info("picamera2 not available (%s), falling back to OpenCV", e)
+            self._picam = None
+            self._cap = cv2.VideoCapture(index)
+            if not self._cap.isOpened():
+                logger.error("Cannot open camera %d", index)
 
     @property
     def is_open(self) -> bool:
-        return self._cap.isOpened()
+        if self._picam is not None:
+            return True
+        return self._cap is not None and self._cap.isOpened()
 
     def read(self) -> tuple[bool, np.ndarray | None]:
         with self._lock:
+            if self._picam is not None:
+                try:
+                    # picamera2 returns RGB; convert to BGR for OpenCV compatibility
+                    frame = self._picam.capture_array()
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    return True, frame_bgr
+                except Exception:
+                    return False, None
             return self._cap.read()
 
     def release(self) -> None:
         with self._lock:
-            self._cap.release()
-            logger.info("Camera released")
+            if self._picam is not None:
+                self._picam.stop()
+                self._picam.close()
+                logger.info("Pi Camera released")
+            elif self._cap is not None:
+                self._cap.release()
+                logger.info("Camera released")
 
 
 camera: Camera | None = None

@@ -9,6 +9,12 @@ cd backend
 uv sync
 ```
 
+On a Raspberry Pi with a Pi Camera 3, include the `pi` extra:
+
+```bash
+uv sync --extra pi
+```
+
 ### 2. Run the server
 
 ```bash

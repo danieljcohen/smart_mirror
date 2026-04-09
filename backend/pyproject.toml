@@ -19,6 +19,9 @@ dependencies = [
     "mediapipe>=0.8.0,<=0.10.9",
 ]
 
+[project.optional-dependencies]
+pi = ["picamera2>=0.3.12"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
