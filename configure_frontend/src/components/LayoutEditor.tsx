@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getAllWidgets, getWidget } from "../widgets";
 import { WidgetRenderer } from "./WidgetRenderer";
-import { type LayoutItem, getUser, loadLayout, saveLayout } from "../db/layout";
+import { type LayoutItem, getUser, loadLayout, saveLayout, loadDefaultLayout, saveDefaultLayout } from "../db/layout";
 import { getMirrorLocation, setMirrorLocation } from "../db/settings";
 import { AddressInput } from "./AddressInput";
+
+type LayoutMode = "user" | "default";
 
 const ASPECT = 16 / 9;
 const MIN_W = 8;
@@ -27,8 +29,10 @@ interface LayoutEditorProps {
 }
 
 export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorProps) {
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("user");
   const [userId, setUserId] = useState<number | null>(null);
   const [layout, setLayout] = useState<LayoutItem[]>([]);
+  const [defaultLayout, setDefaultLayout] = useState<LayoutItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -45,20 +49,26 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const dragModeRef = useRef<LayoutMode>("user");
   const dirtyRef = useRef(false);
 
-  // On mount: load user + layout + mirror location
+  // On mount: load user layout + default layout + mirror location
   useEffect(() => {
     let cancelled = false;
     async function init() {
       setLoading(true);
       try {
-        const [uid, loc] = await Promise.all([getUser(userName), getMirrorLocation()]);
+        const [uid, loc, defLayout] = await Promise.all([
+          getUser(userName),
+          getMirrorLocation(),
+          loadDefaultLayout(),
+        ]);
         if (uid === null) { onLogout(); return; }
         const remote = await loadLayout(uid, userName);
         if (!cancelled) {
           setUserId(uid);
           setLayout(remote);
+          setDefaultLayout(defLayout);
           setMirrorLocationState(loc);
         }
       } catch (err) {
@@ -80,7 +90,7 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
       const dx = ((e.clientX - d.startX) / rect.width) * 100;
       const dy = ((e.clientY - d.startY) / rect.height) * 100;
 
-      setLayout(prev =>
+      const updater = (prev: LayoutItem[]) =>
         prev.map(item => {
           if (item.widgetId !== d.widgetId) return item;
           if (d.mode === "drag") {
@@ -96,8 +106,16 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
               h: Math.max(MIN_H, Math.min(100 - d.origY, d.origH + dy)),
             };
           }
-        })
-      );
+        });
+
+      if (d.mode === "drag" || d.mode === "resize") {
+        // Use the layout mode captured at drag-start time via dragModeRef
+        if (dragModeRef.current === "default") {
+          setDefaultLayout(updater);
+        } else {
+          setLayout(updater);
+        }
+      }
       dirtyRef.current = true;
     };
 
@@ -110,12 +128,17 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     };
   }, []);
 
+  // Helpers that operate on whichever layout is currently active
+  const activeLayout    = layoutMode === "user" ? layout    : defaultLayout;
+  const setActiveLayout = layoutMode === "user" ? setLayout : setDefaultLayout;
+
   const startInteraction = useCallback(
     (e: React.PointerEvent, widgetId: string, mode: "drag" | "resize") => {
       e.preventDefault();
       e.stopPropagation();
-      const item = layout.find(i => i.widgetId === widgetId);
+      const item = activeLayout.find(i => i.widgetId === widgetId);
       if (!item) return;
+      dragModeRef.current = layoutMode;
       dragRef.current = {
         widgetId, mode,
         startX: e.clientX, startY: e.clientY,
@@ -123,11 +146,11 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
         origW: item.w, origH: item.h,
       };
     },
-    [layout]
+    [activeLayout, layoutMode]
   );
 
   const addWidget = useCallback((widgetId: string) => {
-    setLayout(prev => {
+    setActiveLayout(prev => {
       if (prev.some(i => i.widgetId === widgetId)) return prev;
       const def = getWidget(widgetId);
       const dl = def?.defaultLayout ?? { w: 4, h: 2 };
@@ -139,16 +162,16 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
       }];
     });
     dirtyRef.current = true;
-  }, []);
+  }, [setActiveLayout]);
 
   const removeWidget = useCallback((widgetId: string) => {
-    setLayout(prev => prev.filter(i => i.widgetId !== widgetId));
+    setActiveLayout(prev => prev.filter(i => i.widgetId !== widgetId));
     if (configPanelId === widgetId) setConfigPanelId(null);
     dirtyRef.current = true;
-  }, [configPanelId]);
+  }, [configPanelId, setActiveLayout]);
 
   const updateWidgetConfig = useCallback((widgetId: string, key: string, value: string) => {
-    setLayout(prev =>
+    setActiveLayout(prev =>
       prev.map(item =>
         item.widgetId === widgetId
           ? { ...item, config: { ...(item.config ?? {}), [key]: value } }
@@ -156,16 +179,20 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
       )
     );
     dirtyRef.current = true;
-  }, []);
+  }, [setActiveLayout]);
 
   const handleSave = async () => {
     setSaving(true);
     setSaveMsg("");
     try {
-      const freshId = await getUser(userName);
-      if (!freshId) { onLogout(); return; }
-      setUserId(freshId);
-      await saveLayout(freshId, userName, layout);
+      if (layoutMode === "default") {
+        await saveDefaultLayout(defaultLayout);
+      } else {
+        const freshId = await getUser(userName);
+        if (!freshId) { onLogout(); return; }
+        setUserId(freshId);
+        await saveLayout(freshId, userName, layout);
+      }
       setSaveMsg("Saved!");
       dirtyRef.current = false;
     } catch (err) {
@@ -191,10 +218,10 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
   };
 
   const allWidgets = getAllWidgets();
-  const activeIds = new Set(layout.map(i => i.widgetId));
+  const activeIds = new Set(activeLayout.map(i => i.widgetId));
 
   const configPanelWidget = configPanelId ? getWidget(configPanelId) : null;
-  const configPanelItem = configPanelId ? layout.find(i => i.widgetId === configPanelId) : null;
+  const configPanelItem = configPanelId ? activeLayout.find(i => i.widgetId === configPanelId) : null;
 
   if (loading) {
     return (
@@ -208,9 +235,26 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     <div className="min-h-screen bg-zinc-950">
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div>
-            <h1 className="text-xl font-light text-white">Layout Editor</h1>
-            <p className="text-sm text-zinc-500">{userName}</p>
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-xl font-light text-white">Layout Editor</h1>
+              <p className="text-sm text-zinc-500">{userName}</p>
+            </div>
+            {/* Mode tabs */}
+            <div className="flex rounded-lg border border-zinc-700 overflow-hidden text-sm">
+              <button
+                onClick={() => { setLayoutMode("user"); setConfigPanelId(null); }}
+                className={`px-4 py-1.5 transition ${layoutMode === "user" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`}
+              >
+                My Layout
+              </button>
+              <button
+                onClick={() => { setLayoutMode("default"); setConfigPanelId(null); }}
+                className={`px-4 py-1.5 transition border-l border-zinc-700 ${layoutMode === "default" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white"}`}
+              >
+                Default Layout
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {saveMsg && (
@@ -257,12 +301,14 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
           className="relative w-full select-none overflow-hidden rounded-2xl border border-zinc-800 bg-black"
           style={{ aspectRatio: `${ASPECT}` }}
         >
-          {layout.length === 0 && (
+          {activeLayout.length === 0 && (
             <div className="flex h-full items-center justify-center text-zinc-500">
-              Add widgets below to get started
+              {layoutMode === "default"
+                ? "Add widgets to build the default mirror layout"
+                : "Add widgets below to get started"}
             </div>
           )}
-          {layout.map(item => (
+          {activeLayout.map(item => (
             <div
               key={item.widgetId}
               className="group absolute cursor-grab rounded-xl border border-zinc-700 bg-zinc-900/60 hover:border-zinc-500 active:cursor-grabbing active:border-blue-500/60"

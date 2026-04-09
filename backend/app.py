@@ -586,14 +586,51 @@ def proxy_sports_scores():
         return jsonify({"status": "ERROR", "error": str(e)}), 502
 
 
+@app.get("/layout/__default__")
+def get_default_layout():
+    import json as _json
+    raw = get_global_setting("default_layout")
+    if raw:
+        try:
+            return jsonify({"layout": _json.loads(raw)})
+        except Exception:
+            pass
+    return jsonify({"layout": DEFAULT_LAYOUT})
+
+
+@app.post("/layout/__default__")
+def save_default_layout():
+    import json as _json
+    body = request.get_json(force=True)
+    layout = body.get("layout")
+    if layout is None:
+        return jsonify({"error": "missing layout"}), 400
+    from db import set_global_setting
+    set_global_setting("default_layout", _json.dumps(layout))
+    return jsonify({"status": "OK"})
+
+
+def _get_default_layout():
+    """Return the custom default layout from Supabase settings, or fall back to hardcoded."""
+    import json as _json
+    raw = get_global_setting("default_layout")
+    if raw:
+        try:
+            return _json.loads(raw)
+        except Exception:
+            pass
+    return DEFAULT_LAYOUT
+
+
 @app.get("/layout/<name>")
 def get_layout_by_name(name: str):
     """Public endpoint used by the mirror display to fetch a user's layout."""
+    default = _get_default_layout()
     user = get_user_by_name(name)
     if user is None:
-        return jsonify({"layout": DEFAULT_LAYOUT})
+        return jsonify({"layout": default})
     layout = get_layout(user["id"])
-    return jsonify({"layout": layout or DEFAULT_LAYOUT})
+    return jsonify({"layout": layout or default})
 
 
 

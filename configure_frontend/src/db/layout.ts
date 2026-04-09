@@ -55,7 +55,6 @@ export async function loadLayout(userId: number, userName: string): Promise<Layo
 
 /** Save layout to Supabase and update localStorage cache. */
 export async function saveLayout(userId: number, userName: string, layout: LayoutItem[]): Promise<void> {
-  // Always update local cache immediately
   localStorage.setItem(CACHE_KEY(userName), JSON.stringify(layout));
 
   const { error } = await supabase.from("layouts").upsert(
@@ -64,4 +63,41 @@ export async function saveLayout(userId: number, userName: string, layout: Layou
   );
 
   if (error) throw new Error(`Failed to save layout: ${error.message}`);
+}
+
+// ── Default layout ───────────────────────────────────────────────────
+
+const DEFAULT_CACHE_KEY = "mirror:layout:__default__";
+
+/** Load the mirror-wide default layout (shown when no user is recognised). */
+export async function loadDefaultLayout(): Promise<LayoutItem[]> {
+  try {
+    const { data } = await supabase
+      .from("settings")
+      .select("value")
+      .eq("key", "default_layout")
+      .limit(1);
+
+    if (data && data.length > 0) {
+      const layout = JSON.parse(data[0].value) as LayoutItem[];
+      localStorage.setItem(DEFAULT_CACHE_KEY, JSON.stringify(layout));
+      return layout;
+    }
+  } catch (err) {
+    console.warn("[layout] default load failed, using cache:", err);
+  }
+
+  const cached = localStorage.getItem(DEFAULT_CACHE_KEY);
+  return cached ? (JSON.parse(cached) as LayoutItem[]) : [];
+}
+
+/** Save the mirror-wide default layout to Supabase. */
+export async function saveDefaultLayout(layout: LayoutItem[]): Promise<void> {
+  localStorage.setItem(DEFAULT_CACHE_KEY, JSON.stringify(layout));
+
+  const { error } = await supabase
+    .from("settings")
+    .upsert({ key: "default_layout", value: JSON.stringify(layout) }, { onConflict: "key" });
+
+  if (error) throw new Error(`Failed to save default layout: ${error.message}`);
 }

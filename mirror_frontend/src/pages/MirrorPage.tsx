@@ -27,7 +27,7 @@ function normalizeLayout(items: LayoutItem[]): LayoutItem[] {
   return items;
 }
 
-const DEFAULT_LAYOUT: LayoutItem[] = [
+const FALLBACK_LAYOUT: LayoutItem[] = [
   { widgetId: "clock",    x: 0,     y: 0,  w: 33.33, h: 25 },
   { widgetId: "weather",  x: 66.67, y: 0,  w: 33.33, h: 25 },
   { widgetId: "greeting", x: 25,    y: 50, w: 50,    h: 25 },
@@ -35,9 +35,8 @@ const DEFAULT_LAYOUT: LayoutItem[] = [
 
 export default function MirrorPage() {
   const names = useRecognition();
-  const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT);
+  const [layout, setLayout] = useState<LayoutItem[]>(FALLBACK_LAYOUT);
   const lastFetched = useRef<string>("");
-  // Stable ref so the polling interval never needs to restart
   const namesRef = useRef<string[]>(names);
   useEffect(() => { namesRef.current = names; }, [names]);
 
@@ -57,19 +56,44 @@ export default function MirrorPage() {
       .catch(() => {});
   };
 
+  const fetchDefaultLayout = () => {
+    fetch("/api/layout/__default__")
+      .then(r => r.json())
+      .then(data => {
+        if (!data.layout?.length) return;
+        const normalized = normalizeLayout(data.layout);
+        const json = JSON.stringify(normalized);
+        if (json === layoutJsonRef.current) return;
+        layoutJsonRef.current = json;
+        setLayout(normalized);
+      })
+      .catch(() => {});
+  };
+
+  // Fetch on startup — grab the default layout immediately
+  useEffect(() => { fetchDefaultLayout(); }, []);
+
   // Fetch immediately when the recognized person changes
   useEffect(() => {
     const primaryName = names[0];
-    if (!primaryName || primaryName === lastFetched.current) return;
+    if (!primaryName) {
+      if (lastFetched.current) {
+        lastFetched.current = "";
+        fetchDefaultLayout();
+      }
+      return;
+    }
+    if (primaryName === lastFetched.current) return;
     lastFetched.current = primaryName;
     fetchLayout(primaryName);
   }, [names]);
 
-  // Re-fetch every 10s — empty deps so the interval is never torn down mid-cycle
+  // Re-fetch every 10s
   useEffect(() => {
     const interval = setInterval(() => {
       const primaryName = namesRef.current[0];
       if (primaryName) fetchLayout(primaryName);
+      else fetchDefaultLayout();
     }, 10_000);
     return () => clearInterval(interval);
   }, []);
