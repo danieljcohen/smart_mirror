@@ -1,6 +1,50 @@
 import { registerWidget } from "./registry";
 
-function GeminiChatPreview(_: { config?: Record<string, string> }) {
+function GeminiChatPreview({ config }: { config?: Record<string, string> }) {
+  const mode = config?.mode ?? "chat";
+
+  if (mode === "voice") {
+    return (
+      <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
+        {/* Ambient glow */}
+        <div
+          className="absolute rounded-full blur-3xl opacity-25"
+          style={{ width: "65%", height: "65%", background: "rgba(59,130,246,0.55)" }}
+        />
+        {/* Rings */}
+        {[0, 1, 2].map(i => (
+          <div
+            key={i}
+            className="absolute animate-ping rounded-full border-2 border-blue-400"
+            style={{
+              width: `${28 + i * 10}cqmin`,
+              height: `${28 + i * 10}cqmin`,
+              opacity: 0.45 - i * 0.12,
+              animationDelay: `${i * 0.45}s`,
+              animationDuration: "1.6s",
+            }}
+          />
+        ))}
+        {/* Orb */}
+        <div
+          className="relative z-10 animate-pulse rounded-full bg-gradient-to-br from-blue-400 to-blue-600"
+          style={{
+            width: "18cqmin",
+            height: "18cqmin",
+            boxShadow: "0 0 18px rgba(59,130,246,0.55), 0 0 40px rgba(59,130,246,0.3)",
+            animationDuration: "2s",
+          }}
+        />
+        <div className="absolute bottom-4 left-0 right-0 text-center">
+          <span className="text-white/40" style={{ fontSize: "7cqmin" }}>
+            Listening…
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Chat mode preview
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-white/5">
       <div className="flex-1 space-y-2 p-3">
@@ -40,6 +84,17 @@ registerWidget({
   description: "AI chat with image support powered by Google Gemini",
   defaultLayout: { w: 4, h: 4, minW: 3, minH: 3 },
   component: GeminiChatPreview,
+  configFields: [
+    {
+      key: "mode",
+      label: "Display Mode",
+      type: "select",
+      options: [
+        { value: "chat", label: "Chat (text history)" },
+        { value: "voice", label: "Voice only (animated orb)" },
+      ],
+    },
+  ],
 });
 
 export default GeminiChatPreview;

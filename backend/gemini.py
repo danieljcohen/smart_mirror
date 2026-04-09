@@ -1,10 +1,13 @@
 import os
 import base64
 import logging
+import time
 
+import requests as http_requests
 from google import genai
 from google.genai import types
 from flask import Blueprint, jsonify, request
+from db import get_global_setting
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,63 @@ def _get_client() -> genai.Client:
             raise RuntimeError("GEMINI_API_KEY is not set")
         _client = genai.Client(api_key=api_key)
     return _client
+
+
+_weather_cache: dict = {"context": "", "location": "", "ts": 0.0}
+WEATHER_CACHE_TTL = 10 * 60  # refresh every 10 minutes
+
+
+def _weather_label(code: int) -> str:
+    if code == 0:    return "clear"
+    if code <= 3:    return "partly cloudy"
+    if code <= 48:   return "foggy"
+    if code <= 67:   return "rainy"
+    if code <= 77:   return "snowy"
+    if code <= 82:   return "showery"
+    if code <= 86:   return "snowy showers"
+    return "stormy"
+
+
+def _fetch_weather_context(location: str) -> str:
+    """Geocode location then pull current conditions from Open-Meteo.
+    Result is cached for WEATHER_CACHE_TTL seconds so every message isn't delayed."""
+    global _weather_cache
+    now = time.time()
+    if (
+        _weather_cache["location"] == location
+        and now - _weather_cache["ts"] < WEATHER_CACHE_TTL
+    ):
+        return _weather_cache["context"]
+
+    try:
+        geo = http_requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": location, "format": "json", "limit": 1},
+            headers={"User-Agent": "SmartMirror/1.0"},
+            timeout=5,
+        ).json()
+        if not geo:
+            return ""
+        lat, lon = geo[0]["lat"], geo[0]["lon"]
+
+        wx = http_requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,weather_code",
+                "temperature_unit": "fahrenheit",
+            },
+            timeout=5,
+        ).json()
+        temp = round(wx["current"]["temperature_2m"])
+        desc = _weather_label(wx["current"]["weather_code"])
+        context = f" Current weather: {temp}°F and {desc}."
+    except Exception:
+        context = ""
+
+    _weather_cache = {"context": context, "location": location, "ts": now}
+    return context
 
 
 def _build_contents(messages: list[dict]) -> list[types.Content]:
@@ -59,8 +119,23 @@ def gemini_chat():
         return jsonify({"error": str(e)}), 500
 
     try:
+        mirror_location = get_global_setting("mirror_location") or ""
+        location_context = (
+            f" The mirror is located at: {mirror_location}."
+            if mirror_location else ""
+        )
+        weather_context = _fetch_weather_context(mirror_location) if mirror_location else ""
         contents = _build_contents(messages)
-        response = client.models.generate_content(model=MODEL, contents=contents)
+        config = types.GenerateContentConfig(
+            system_instruction=(
+                "You are Jarvis, a smart mirror assistant."
+                f"{location_context}"
+                f"{weather_context}"
+                " Always reply in 1–2 sentences maximum."
+                " Be direct and natural, as if speaking out loud."
+            )
+        )
+        response = client.models.generate_content(model=MODEL, contents=contents, config=config)
         return jsonify({"response": response.text})
     except Exception as e:
         logger.exception("Gemini API error")
