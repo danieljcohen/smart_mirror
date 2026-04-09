@@ -55,7 +55,7 @@ yarn dev
 
 If you have set up on this, log in, or else register. 
 
-- When registering, set Raspberry Pi URL to [http://localhost:3000](http://localhost:3000) when registering locally
+- When registering, set Ras pberry Pi URL to [http://localhost:3000](http://localhost:3000) when registering locally
 
 ## Authors
 
