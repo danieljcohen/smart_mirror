@@ -394,6 +394,12 @@ def proxy_geocode():
         return jsonify({"status": "ERROR", "error": str(e)}), 502
 
 
+# Cache YouTube results for 6 hours to avoid burning through the free 10k unit/day quota
+# (each search costs 100 units, so without caching even 100 page loads exhausts it)
+_yt_cache: dict = {}
+_YT_CACHE_TTL = 6 * 60 * 60  # 6 hours in seconds
+
+
 @app.get("/youtube/shorts")
 def proxy_youtube_shorts():
     if not YOUTUBE_API_KEY:
@@ -405,9 +411,13 @@ def proxy_youtube_shorts():
 
     # Extract channel ID from a full YouTube URL or @handle if provided
     if channel_id.startswith("http"):
-        # e.g. https://www.youtube.com/@handle or /channel/UCxxx
         parts = [p for p in channel_id.rstrip("/").split("/") if p]
         channel_id = parts[-1] if parts else channel_id
+
+    cache_key = f"{source_type}|{channel_id}|{search_query}"
+    cached = _yt_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"] < _YT_CACHE_TTL):
+        return jsonify({"status": "OK", "videoIds": cached["videoIds"], "cached": True})
 
     params: dict = {
         "part": "snippet",
@@ -436,7 +446,85 @@ def proxy_youtube_shorts():
             return jsonify({"status": "ERROR", "error": data["error"].get("message", "YouTube API error")}), 502
         items = data.get("items", [])
         video_ids = [i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId")]
+        _yt_cache[cache_key] = {"videoIds": video_ids, "ts": time.time()}
         return jsonify({"status": "OK", "videoIds": video_ids})
+    except Exception as e:
+        return jsonify({"status": "ERROR", "error": str(e)}), 502
+
+
+import xml.etree.ElementTree as ET
+
+_news_cache: dict = {}
+_NEWS_CACHE_TTL = 30 * 60  # 30 minutes
+
+# Keywords that signal entertainment/celebrity/sports/lifestyle fluff
+_FLUFF_KEYWORDS = {
+    # Celebrity & entertainment
+    "celebrity", "celebrities", "kardashian", "taylor swift", "beyoncé", "beyonce",
+    "justin bieber", "kanye", "drake", "rihanna", "britney", "selena gomez",
+    "oscars", "emmys", "grammys", "bafta", "golden globe", "red carpet",
+    "hollywood", "box office", "album", "tour dates", "music video",
+    "reality tv", "reality show", "bachelor", "dancing with the stars",
+    "married at first", "love island", "big brother",
+    # Sports (unless you want this — remove if desired)
+    "nfl", "nba", "nhl", "mlb", "fifa", "premier league", "champions league",
+    "super bowl", "world cup", "transfer fee", "transfer window",
+    "touchdown", "home run", "slam dunk",
+    # Lifestyle / soft news
+    "recipe", "diet tips", "weight loss", "horoscope", "zodiac",
+    "relationship advice", "dating tips", "fashion week", "beauty tips",
+    "skincare", "makeup tutorial", "viral video", "tiktok trend",
+    "influencer", "OnlyFans", "paparazzi",
+}
+
+
+def _is_fluff(title: str) -> bool:
+    """Return True if the headline is celebrity/entertainment/sports fluff."""
+    lower = title.lower()
+    return any(kw in lower for kw in _FLUFF_KEYWORDS)
+
+NEWS_SOURCES = {
+    "bbc":      ("BBC News",       "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    "bbc_biz":  ("BBC Business",   "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    "reuters":  ("Reuters",        "https://feeds.reuters.com/reuters/topNews"),
+    "ap":       ("AP News",        "https://rsshub.app/apnews/topics/apf-topnews"),
+    "ft":       ("Financial Times","https://www.ft.com/rss/home/uk"),
+    "wsj":      ("WSJ",            "https://feeds.a.dj.com/rss/RSSWorldNews.xml"),
+}
+
+
+@app.get("/news/headlines")
+def proxy_news_headlines():
+    source = request.args.get("source", "bbc").lower()
+    label, feed_url = NEWS_SOURCES.get(source, NEWS_SOURCES["bbc"])
+
+    cached = _news_cache.get(source)
+    if cached and (time.time() - cached["ts"] < _NEWS_CACHE_TTL):
+        return jsonify({"status": "OK", "headlines": cached["headlines"], "cached": True})
+
+    try:
+        resp = http_requests.get(
+            feed_url,
+            headers={"User-Agent": "SmartMirror/1.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        ns = {"media": "http://search.yahoo.com/mrss/"}
+
+        headlines = []
+        for item in root.iter("item"):
+            title = item.findtext("title", "").strip()
+            if not title or title.lower() in {"top stories", "news", ""}:
+                continue
+            if _is_fluff(title):
+                continue
+            headlines.append({"title": title, "source": label})
+            if len(headlines) >= 20:
+                break
+
+        _news_cache[source] = {"headlines": headlines, "ts": time.time()}
+        return jsonify({"status": "OK", "headlines": headlines})
     except Exception as e:
         return jsonify({"status": "ERROR", "error": str(e)}), 502
 
