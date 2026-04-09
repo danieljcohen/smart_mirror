@@ -73,6 +73,14 @@ def gesture_monitor_loop(get_camera_func):
     while True:
         time.sleep(0.05) # 20 Hz
         
+        with _GESTURE_LOCK:
+            is_active = len(_LISTENERS) > 0
+            
+        if not is_active:
+            # Do not engage CPU-heavy MediaPipe tracking if nobody is looking
+            history.clear()
+            continue
+        
         cam = get_camera_func()
         if not cam.is_open:
             continue
