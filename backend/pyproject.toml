@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pi = ["picamera2>=0.3.12"]
+pi = ["picamera2>=0.3.12; sys_platform == 'linux'"]
 
 [build-system]
 requires = ["hatchling"]
@@ -28,3 +28,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 only-include = ["app.py", "db.py", "auth.py", "face_store.py"]
+
+# Need this to avoid picamera attempting to build on MacOS
+[tool.uv]
+[[tool.uv.dependency-metadata]]
+name = "python-prctl"
+version = "1.8.1"
