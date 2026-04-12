@@ -4,15 +4,20 @@
 
 ### 1. Create venv and install packages
 
+On Mac:
+
 ```bash
 cd backend
 uv sync
 ```
 
-On a Raspberry Pi with a Pi Camera 3, include the `pi` extra:
+On Raspberry Pi:
 
 ```bash
-uv sync --extra pi
+sudo apt install -y python3-picamera2 libcap-dev
+cd backend
+uv venv --system-site-packages
+uv sync
 ```
 
 ### 2. Run the server
