@@ -16,7 +16,7 @@ On Raspberry Pi:
 ```bash
 sudo apt install -y python3-picamera2 libcap-dev
 cd backend
-uv venv --system-site-packages
+uv venv --system-site-packages --python 3.13
 uv sync
 ```
 
