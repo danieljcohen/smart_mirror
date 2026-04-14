@@ -4,6 +4,8 @@ import { registerWidget } from "./registry";
 const REFRESH_MS = 30 * 60 * 1_000;
 // Shorts max length is 60s — advance after 65s as a hard fallback
 const FALLBACK_MS = 65_000;
+const GESTURE_POLL_MS = 250;
+const GESTURE_HEARTBEAT_MS = 1500;
 
 function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const sourceType = config?.source_type ?? "trending";
@@ -58,25 +60,51 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, videoIds.length]);
 
-  // Listen for gesture events from backend
+  // Poll latest gesture from backend (more robust than SSE across proxies)
   useEffect(() => {
-    const eventSource = new EventSource("/api/gesture_stream");
+    let cancelled = false;
 
-    eventSource.onmessage = (e) => {
+    const pollGesture = async () => {
       try {
-        const data = JSON.parse(e.data);
-        if (data.type === "flick_up") {
+        const res = await fetch("/api/gesture/consume");
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled && data.type === "flick_up") {
           advance();
         }
-      } catch (err) {
-        // silently ignore parse errors
+      } catch {
+        // ignore transient network errors
       }
     };
 
+    const id = setInterval(pollGesture, GESTURE_POLL_MS);
     return () => {
-      eventSource.close();
+      cancelled = true;
+      clearInterval(id);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Heartbeat while reels widget is mounted so backend tracks gestures only when active
+  useEffect(() => {
+    let cancelled = false;
+
+    const sendHeartbeat = async () => {
+      try {
+        await fetch("/api/gesture/heartbeat", { method: "POST" });
+      } catch {
+        if (!cancelled) {
+          // ignore transient network errors
+        }
+      }
+    };
+
+    sendHeartbeat();
+    const id = setInterval(sendHeartbeat, GESTURE_HEARTBEAT_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
 

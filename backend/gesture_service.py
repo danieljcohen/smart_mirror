@@ -1,19 +1,20 @@
 import threading
 import time
 import logging
-import cv2
 import queue
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 try:
-    import mediapipe as mp
+    from picamera2 import Picamera2
 except ImportError:
-    mp = None
+    Picamera2 = None
 
 # Global latest gesture
 LATEST_GESTURE = None
 _GESTURE_LOCK = threading.Lock()
+_LAST_REELS_HEARTBEAT_AT = 0.0
 
 _LISTENERS = []
 
@@ -21,12 +22,14 @@ def subscribe():
     q = queue.Queue(maxsize=10)
     with _GESTURE_LOCK:
         _LISTENERS.append(q)
+        logger.info("Gesture subscriber connected (total=%d)", len(_LISTENERS))
     return q
 
 def unsubscribe(q):
     with _GESTURE_LOCK:
         if q in _LISTENERS:
             _LISTENERS.remove(q)
+            logger.info("Gesture subscriber disconnected (total=%d)", len(_LISTENERS))
 
 def _broadcast_gesture(gesture):
     with _GESTURE_LOCK:
@@ -48,71 +51,147 @@ def clear_gesture():
     with _GESTURE_LOCK:
         LATEST_GESTURE = None
 
-def gesture_monitor_loop(get_camera_func):
+def consume_latest_gesture() -> dict | None:
+    global LATEST_GESTURE
+    with _GESTURE_LOCK:
+        gesture = LATEST_GESTURE
+        LATEST_GESTURE = None
+        return gesture
+
+def mark_reels_active_heartbeat() -> None:
+    global _LAST_REELS_HEARTBEAT_AT
+    with _GESTURE_LOCK:
+        _LAST_REELS_HEARTBEAT_AT = time.time()
+
+def gesture_monitor_loop(get_camera_func=None):
     """
-    Background thread that polls the camera and runs MediaPipe hands.
-    If a hand moves UP rapidly, record a flick_up.
+    Background thread that polls camera frames and detects upward flick motion.
+    Uses frame differencing with NumPy (no MediaPipe dependency).
     """
-    if mp is None:
-        logger.warning("MediaPipe not installed, gesture monitoring disabled.")
+    history: list[tuple[float, float]] = []
+    HISTORY_MAX_AGE = 0.6
+    FLICK_WINDOW_SEC = 0.25
+    MIN_ACTIVE_PIXELS = 420
+    MAX_ACTIVE_PIXELS = 5000
+    MIN_UP_DELTA_PX = 18.0
+    MIN_UP_VELOCITY = 70.0
+    COOLDOWN_SEC = 0.8
+    prev_gray_small: np.ndarray | None = None
+    last_detected_at = 0.0
+    picam = None
+    source_mode = "none"
+
+    if Picamera2 is not None:
+        try:
+            picam = Picamera2()
+            config = picam.create_video_configuration(
+                main={"size": (640, 480), "format": "RGB888"}
+            )
+            picam.configure(config)
+            picam.start()
+            logger.info("Gesture service using picamera2.")
+            source_mode = "picamera2"
+        except Exception as e:
+            logger.warning("Failed to initialize picamera2 for gestures: %s", e)
+            picam = None
+
+    if picam is None and get_camera_func is not None:
+        source_mode = "shared_camera"
+        logger.info("Gesture service using shared camera fallback.")
+
+    if source_mode == "none":
+        logger.error("No camera source available for gesture monitoring.")
         return
-
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
-
-    history = []
-    HISTORY_MAX_AGE = 0.5
 
     logger.info("Gesture monitoring started.")
 
-    while True:
-        time.sleep(0.05) # 20 Hz
-        
-        with _GESTURE_LOCK:
-            is_active = len(_LISTENERS) > 0
-            
-        if not is_active:
-            # Do not engage CPU-heavy MediaPipe tracking if nobody is looking
-            history.clear()
-            continue
-        
-        cam = get_camera_func()
-        if not cam.is_open:
-            continue
-            
-        ok, frame = cam.read()
-        if not ok or frame is None:
-            continue
-            
-        small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        frame_rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(frame_rgb)
-        
-        now = time.time()
-        
-        if results.multi_hand_landmarks:
-            lm = results.multi_hand_landmarks[0].landmark[9]
-            history.append((now, lm.y))
-            
+    try:
+        while True:
+            time.sleep(0.05) # 20 Hz
+
+            with _GESTURE_LOCK:
+                # Active only when a reels widget is actively heartbeating
+                # or when SSE listeners are connected.
+                is_active = (len(_LISTENERS) > 0) or ((time.time() - _LAST_REELS_HEARTBEAT_AT) < 3.0)
+
+            if not is_active:
+                history.clear()
+                prev_gray_small = None
+                continue
+
+            if source_mode == "picamera2":
+                try:
+                    # picamera2 gives RGB frame as HxWx3 uint8
+                    frame = picam.capture_array()
+                except Exception:
+                    continue
+            else:
+                cam = get_camera_func()
+                if not cam.is_open:
+                    continue
+                ok, frame = cam.read()
+                if not ok or frame is None:
+                    continue
+
+            now = time.time()
+            if (now - last_detected_at) < COOLDOWN_SEC:
+                continue
+
+            # Downsample aggressively for speed and denoise via 3x3 box blur.
+            gray = frame.astype(np.float32).mean(axis=2)
+            gray_small = gray[::4, ::4]
+
+            padded = np.pad(gray_small, ((1, 1), (1, 1)), mode="edge")
+            gray_blur = (
+                padded[:-2, :-2] + padded[:-2, 1:-1] + padded[:-2, 2:]
+                + padded[1:-1, :-2] + padded[1:-1, 1:-1] + padded[1:-1, 2:]
+                + padded[2:, :-2] + padded[2:, 1:-1] + padded[2:, 2:]
+            ) / 9.0
+
+            if prev_gray_small is None:
+                prev_gray_small = gray_blur
+                continue
+
+            diff = np.abs(gray_blur - prev_gray_small)
+            prev_gray_small = gray_blur
+
+            # Motion mask in the downsampled frame.
+            motion = diff > 22.0
+            active_pixels = int(motion.sum())
+            if active_pixels < MIN_ACTIVE_PIXELS or active_pixels > MAX_ACTIVE_PIXELS:
+                history = [(t, y) for t, y in history if now - t < HISTORY_MAX_AGE]
+                continue
+
+            ys, xs = np.nonzero(motion)
+            if ys.size == 0:
+                continue
+
+            # y is in downsampled pixels; smaller y means higher in frame.
+            centroid_y = float(ys.mean())
+            history.append((now, centroid_y))
+            history = [(t, y) for t, y in history if now - t < HISTORY_MAX_AGE]
+
             if len(history) > 1:
                 current_t, current_y = history[-1]
                 for t, y in reversed(history[:-1]):
-                    if current_t - t > 0.3:
+                    dt = current_t - t
+                    if dt > FLICK_WINDOW_SEC:
                         break
-                    if (y - current_y) > 0.05:
+                    up_delta = y - current_y
+                    up_velocity = up_delta / max(dt, 1e-6)
+                    if dt >= 0.08 and up_delta > MIN_UP_DELTA_PX and up_velocity > MIN_UP_VELOCITY:
                         _broadcast_gesture({
                             "type": "flick_up",
                             "timestamp": now
                         })
-                        logger.info("Flick up detected!")
+                        logger.info("Flick up detected (delta=%.1f, vel=%.1f).", up_delta, up_velocity)
                         history.clear()
-                        # Cooldown to prevent double-scrolls
-                        time.sleep(0.8)
+                        last_detected_at = now
                         break
-
-        history = [(t, y) for t, y in history if now - t < HISTORY_MAX_AGE]
+    finally:
+        if picam is not None:
+            try:
+                picam.stop()
+                picam.close()
+            except Exception:
+                pass
