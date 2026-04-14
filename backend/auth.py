@@ -3,7 +3,7 @@ import faulthandler
 import logging
 import traceback
 
-#import cv2
+import cv2
 import face_recognition
 import numpy as np
 from flask import Blueprint, jsonify, request

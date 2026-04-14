@@ -67,6 +67,14 @@ def gesture_monitor_loop(get_camera_func=None):
     """
     Background thread that polls camera frames and detects upward flick motion.
     Uses frame differencing with NumPy (no MediaPipe dependency).
+
+    When ``get_camera_func`` is provided (normal app startup), frames come from the
+    shared ``Camera`` in app.py: picamera2 on Raspberry Pi when available, OpenCV
+    elsewhere. Opening a second Picamera2 here would fail with buffer allocation
+    errors on the Pi.
+
+    If ``get_camera_func`` is omitted (e.g. manual testing), tries a standalone
+    Picamera2, then OpenCV VideoCapture.
     """
     history: list[tuple[float, float]] = []
     HISTORY_MAX_AGE = 0.6
@@ -79,29 +87,40 @@ def gesture_monitor_loop(get_camera_func=None):
     prev_gray_small: np.ndarray | None = None
     last_detected_at = 0.0
     picam = None
+    cap = None
     source_mode = "none"
 
-    if Picamera2 is not None:
-        try:
-            picam = Picamera2()
-            config = picam.create_video_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
-            )
-            picam.configure(config)
-            picam.start()
-            logger.info("Gesture service using picamera2.")
-            source_mode = "picamera2"
-        except Exception as e:
-            logger.warning("Failed to initialize picamera2 for gestures: %s", e)
-            picam = None
-
-    if picam is None and get_camera_func is not None:
+    if get_camera_func is not None:
+        # Single camera pipeline — same picamera2 or OpenCV as /video_feed and /recognize
         source_mode = "shared_camera"
-        logger.info("Gesture service using shared camera fallback.")
-
-    if source_mode == "none":
-        logger.error("No camera source available for gesture monitoring.")
-        return
+        logger.info(
+            "Gesture service using shared Camera (picamera2 on Pi when available, "
+            "OpenCV fallback on desktop)."
+        )
+    else:
+        # Standalone: optional second device (not used when app passes get_camera)
+        if Picamera2 is not None:
+            try:
+                picam = Picamera2()
+                config = picam.create_video_configuration(
+                    main={"size": (640, 480), "format": "RGB888"}
+                )
+                picam.configure(config)
+                picam.start()
+                logger.info("Gesture service using standalone picamera2.")
+                source_mode = "picamera2"
+            except Exception as e:
+                logger.warning("Standalone picamera2 failed: %s", e)
+                picam = None
+        if source_mode == "none":
+            import cv2
+            cap = cv2.VideoCapture(0)
+            if cap.isOpened():
+                source_mode = "opencv"
+                logger.info("Gesture service using standalone OpenCV camera.")
+            else:
+                logger.error("No camera available for gesture monitoring.")
+                return
 
     logger.info("Gesture monitoring started.")
 
@@ -119,17 +138,20 @@ def gesture_monitor_loop(get_camera_func=None):
                 prev_gray_small = None
                 continue
 
-            if source_mode == "picamera2":
-                try:
-                    # picamera2 gives RGB frame as HxWx3 uint8
-                    frame = picam.capture_array()
-                except Exception:
-                    continue
-            else:
+            if source_mode == "shared_camera":
                 cam = get_camera_func()
                 if not cam.is_open:
                     continue
                 ok, frame = cam.read()
+                if not ok or frame is None:
+                    continue
+            elif source_mode == "picamera2":
+                try:
+                    frame = picam.capture_array()
+                except Exception:
+                    continue
+            else:
+                ok, frame = cap.read()
                 if not ok or frame is None:
                     continue
 
@@ -193,5 +215,10 @@ def gesture_monitor_loop(get_camera_func=None):
             try:
                 picam.stop()
                 picam.close()
+            except Exception:
+                pass
+        if cap is not None:
+            try:
+                cap.release()
             except Exception:
                 pass
