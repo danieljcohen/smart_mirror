@@ -71,6 +71,12 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
         const data = await res.json();
         if (!cancelled && data.type === "flick_up") {
           advance();
+          // Also force-play in case the new video didn't autoplay
+          setTimeout(() => {
+            iframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*",
+            );
+          }, 500);
         }
       } catch {
         // ignore transient network errors
