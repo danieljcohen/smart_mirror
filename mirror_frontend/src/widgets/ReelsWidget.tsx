@@ -2,10 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { registerWidget } from "./registry";
 
 const REFRESH_MS = 30 * 60 * 1_000;
-// Shorts max length is 60s — advance after 65s as a hard fallback
 const FALLBACK_MS = 65_000;
-const GESTURE_POLL_MS = 250;
-const GESTURE_HEARTBEAT_MS = 1500;
+const GESTURE_POLL_MS = 500;
+const GESTURE_HEARTBEAT_MS = 3_000;
+
+for (const origin of [
+  "https://www.youtube.com",
+  "https://i.ytimg.com",
+  "https://www.google.com",
+]) {
+  if (!document.querySelector(`link[rel="preconnect"][href="${origin}"]`)) {
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = origin;
+    document.head.appendChild(link);
+  }
+}
 
 function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const sourceType = config?.source_type ?? "trending";
@@ -71,12 +83,6 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
         const data = await res.json();
         if (!cancelled && data.type === "flick_up") {
           advance();
-          // Also force-play in case the new video didn't autoplay
-          setTimeout(() => {
-            iframeRef.current?.contentWindow?.postMessage(
-              JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*",
-            );
-          }, 500);
         }
       } catch {
         // ignore transient network errors
@@ -114,7 +120,6 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   }, []);
 
 
-  // Subscribe to iframe events after load so postMessage state changes work
   const onIframeLoad = () => {
     iframeRef.current?.contentWindow?.postMessage(
       JSON.stringify({ event: "listening", id: "yt-reels" }), "*",
@@ -173,7 +178,7 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const videoId = videoIds[idx];
   const src =
     `https://www.youtube.com/embed/${videoId}` +
-    `?autoplay=1&mute=0&controls=0&rel=0&modestbranding=1` +
+    `?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1` +
     `&playsinline=1&enablejsapi=1&fs=0`;
 
   return (
