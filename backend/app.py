@@ -196,13 +196,12 @@ def _generate_mjpeg():
 @app.get("/recognize")
 def recognize_single():
     """Grab the latest frame from the already-open camera and run recognition."""
-    cam = get_camera()
-    if not cam.is_open:
-        return jsonify({"error": "cannot open camera"}), 500
+    if camera is None or not camera.is_open:
+        return jsonify({"timestamp": datetime.now().isoformat(), "faces": []})
 
-    ok, frame = cam.read()
+    ok, frame = camera.read()
     if not ok:
-        return jsonify({"error": "failed to capture frame"}), 500
+        return jsonify({"timestamp": datetime.now().isoformat(), "faces": []})
 
     faces = recognize_frame(frame)
     return jsonify({"timestamp": datetime.now().isoformat(), "faces": faces})
@@ -736,17 +735,20 @@ def get_layout_by_name(name: str):
 
 if __name__ == "__main__":
     init_db()
-    face_store.load_known_faces()
-    # Refresh encodings from Supabase in the background
-    t = threading.Thread(target=_encoding_poll_loop, daemon=True)
-    t.start()
-    
-    # Start gesture monitoring
-    gt = threading.Thread(target=gesture_service.gesture_monitor_loop, args=(get_camera,), daemon=True)
-    gt.start()
+
+    # Try to open camera — if none detected, skip face recognition and gestures entirely
+    cam = get_camera()
+    if cam.is_open:
+        face_store.load_known_faces()
+        t = threading.Thread(target=_encoding_poll_loop, daemon=True)
+        t.start()
+        gt = threading.Thread(target=gesture_service.gesture_monitor_loop, args=(get_camera,), daemon=True)
+        gt.start()
+        logger.info("Camera detected — face recognition and gestures enabled.")
+    else:
+        logger.info("No camera detected — face recognition and gestures disabled.")
 
     # Start speech recognition (Vosk — Linux/Pi only)
     speech_service.start()
 
-    get_camera()
     app.run(host="0.0.0.0", port=3000, debug=False)
