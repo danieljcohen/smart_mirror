@@ -25,8 +25,8 @@ try:
 except ImportError:
     _HAS_VOSK = False
 
-SAMPLE_RATE = 16_000
-BLOCK_SIZE = 4_000  # ~250 ms of audio per block
+VOSK_RATE = 16_000
+BLOCK_DURATION_MS = 250
 
 WAKE_PHRASE = "hey jarvis"
 
@@ -76,14 +76,33 @@ def _broadcast(event: dict) -> None:
 # ── Recognition loop ──────────────────────────────────────────────────────────
 
 def _run() -> None:
+    import numpy as np
+
     vosk.SetLogLevel(-1)
     model = vosk.Model(model_name="vosk-model-small-en-us-0.15")
-    rec = vosk.KaldiRecognizer(model, SAMPLE_RATE)
+    rec = vosk.KaldiRecognizer(model, VOSK_RATE)
 
-    logger.info("Speech service started (Vosk + sounddevice).")
+    # Use the mic's native sample rate and resample to 16 kHz for Vosk
+    device_info = sd.query_devices(sd.default.device[0], "input")
+    device_rate = int(device_info["default_samplerate"])
+    block_size = int(device_rate * BLOCK_DURATION_MS / 1000)
+    need_resample = device_rate != VOSK_RATE
+
+    logger.info(
+        "Speech service started (Vosk + sounddevice). "
+        "Mic rate=%d Hz, Vosk rate=%d Hz, resample=%s.",
+        device_rate, VOSK_RATE, need_resample,
+    )
 
     def callback(indata: bytes, frames: int, time_info: dict, status: int) -> None:
-        if rec.AcceptWaveform(bytes(indata)):
+        audio = np.frombuffer(indata, dtype=np.int16)
+        if need_resample:
+            # Simple linear resampling — good enough for speech
+            indices = np.round(np.linspace(0, len(audio) - 1, int(len(audio) * VOSK_RATE / device_rate))).astype(int)
+            audio = audio[indices]
+        data = audio.tobytes()
+
+        if rec.AcceptWaveform(data):
             result = json.loads(rec.Result())
             text = result.get("text", "").strip()
             if text:
@@ -96,8 +115,8 @@ def _run() -> None:
 
     try:
         with sd.RawInputStream(
-            samplerate=SAMPLE_RATE,
-            blocksize=BLOCK_SIZE,
+            samplerate=device_rate,
+            blocksize=block_size,
             dtype="int16",
             channels=1,
             callback=callback,
