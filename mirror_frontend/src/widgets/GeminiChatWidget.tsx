@@ -13,7 +13,7 @@ const WAKE_PHRASE = "hey jarvis";
 const CAMERA_PHRASES = ["take a picture"];
 const CLEAR_PHRASES = ["clear chat", "new conversation", "start over", "reset chat"];
 
-const SpeechRecognition =
+const BrowserSpeechRecognition =
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 function speak(
@@ -24,13 +24,10 @@ function speak(
   const synth = window.speechSynthesis;
   if (!synth) { onEnd?.(); return; }
 
-  // Cancel anything currently queued/playing
   synth.cancel();
 
-  // Wait 100ms for cancel() to fully process (Chrome async internals),
-  // then speak. No voice-loading check — browser uses default voice if none set.
   setTimeout(() => {
-    synth.resume(); // un-stick Chrome's silent-pause bug
+    synth.resume();
 
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.05;
@@ -50,7 +47,6 @@ function speak(
 
     synth.speak(u);
 
-    // Prevent Chrome from silently pausing long utterances after ~15s
     const hb = setInterval(() => {
       if (!synth.speaking) { done(); return; }
       synth.pause();
@@ -97,12 +93,11 @@ function VoiceOnlyView({
   const isListening = phase === "listening";
   const isThinking  = phase === "processing";
 
-  const GLOW = "59,130,246"; // always blue
+  const GLOW = "59,130,246";
   const glowRgb = `rgba(${GLOW},0.55)`;
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
-      {/* Ambient bloom */}
       <div
         className="absolute rounded-full blur-3xl transition-all duration-700"
         style={{
@@ -113,7 +108,6 @@ function VoiceOnlyView({
         }}
       />
 
-      {/* Expanding rings — listening */}
       {isListening &&
         [0, 1, 2].map(i => (
           <div
@@ -129,7 +123,6 @@ function VoiceOnlyView({
           />
         ))}
 
-      {/* Spinning arc — thinking */}
       {isThinking && (
         <div
           className="absolute animate-spin rounded-full border-2 border-transparent border-t-blue-400 border-r-blue-400/50"
@@ -137,7 +130,6 @@ function VoiceOnlyView({
         />
       )}
 
-      {/* Central orb — pulses slowly when idle/listening; beats on every spoken word */}
       <div
         className={`relative z-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 transition-all duration-500 ${
           active ? "opacity-100" : "opacity-0 scale-0"
@@ -158,7 +150,6 @@ function VoiceOnlyView({
         }}
       />
 
-      {/* Status text */}
       <div
         className="absolute bottom-4 left-0 right-0 px-4 text-center transition-opacity duration-300"
         style={{ opacity: active ? 1 : 0 }}
@@ -174,7 +165,6 @@ function VoiceOnlyView({
         )}
       </div>
 
-      {/* Idle hint */}
       {!active && (
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-white/15" style={{ fontSize: "7cqmin" }}>Say "Hey Jarvis"</span>
@@ -182,6 +172,95 @@ function VoiceOnlyView({
       )}
     </div>
   );
+}
+
+// ── Backend speech hook (Vosk via SSE) ───────────────────────────────────────
+
+function useBackendSpeech(
+  onFinal: (text: string) => void,
+  onPartial: (text: string) => void,
+) {
+  const onFinalRef = useRef(onFinal);
+  const onPartialRef = useRef(onPartial);
+  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+  useEffect(() => { onPartialRef.current = onPartial; }, [onPartial]);
+
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout>;
+
+    function connect() {
+      es = new EventSource("/api/speech/stream");
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === "final") onFinalRef.current(data.text);
+          else if (data.type === "partial") onPartialRef.current(data.text);
+        } catch { /* ignore */ }
+      };
+      es.onerror = () => {
+        es?.close();
+        retryTimer = setTimeout(connect, 3000);
+      };
+    }
+
+    connect();
+    return () => { es?.close(); clearTimeout(retryTimer); };
+  }, []);
+}
+
+// ── Browser speech hook (Web Speech API fallback for non-Pi) ─────────────────
+
+function useBrowserSpeech(
+  onFinal: (text: string) => void,
+  onPartial: (text: string) => void,
+  phaseRef: React.MutableRefObject<Phase>,
+) {
+  const onFinalRef = useRef(onFinal);
+  const onPartialRef = useRef(onPartial);
+  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+  useEffect(() => { onPartialRef.current = onPartial; }, [onPartial]);
+
+  useEffect(() => {
+    if (!BrowserSpeechRecognition) return;
+    let stopped = false;
+
+    function startRecognizer() {
+      if (stopped) return;
+      const r = new BrowserSpeechRecognition();
+      r.continuous = true;
+      r.interimResults = true;
+      r.lang = "en-US";
+
+      r.onresult = (e: any) => {
+        if (phaseRef.current === "processing") return;
+        let interim = "";
+        let final_ = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) final_ += t;
+          else interim += t;
+        }
+        if (interim) onPartialRef.current(interim);
+        if (final_) onFinalRef.current(final_);
+      };
+
+      r.onend = () => {
+        if (!stopped) setTimeout(startRecognizer, 300);
+      };
+
+      r.onerror = (e: any) => {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          stopped = true;
+        }
+      };
+
+      try { r.start(); } catch { /* */ }
+    }
+
+    startRecognizer();
+    return () => { stopped = true; };
+  }, [phaseRef]);
 }
 
 // ── Main widget ───────────────────────────────────────────────────────────────
@@ -196,12 +275,12 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
   const [interimText, setInterimText] = useState("");
   const [, setSpokenText] = useState("");
   const [orbBeat, setOrbBeat] = useState(false);
+  const [useBackend, setUseBackend] = useState<boolean | null>(null);
   const orbBeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const phaseRef = useRef<Phase>(phase);
-  const recogRef = useRef<any>(null);
   const speakIdRef = useRef(0);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -210,6 +289,14 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, phase, interimText]);
+
+  // Probe backend to decide which speech source to use
+  useEffect(() => {
+    fetch("/api/speech/available")
+      .then(r => r.json())
+      .then(data => setUseBackend(data.available === true))
+      .catch(() => setUseBackend(false));
+  }, []);
 
   const sendToGemini = useCallback(async (text: string, image?: string | null) => {
     const userMsg: ChatMessage = { role: "user", text, image: image ?? undefined };
@@ -235,7 +322,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
         speak(
           reply,
           () => {
-            if (speakIdRef.current !== sid) return; // interrupted — don't reset
+            if (speakIdRef.current !== sid) return;
             setSpokenText(""); setOrbBeat(false); setPhase("waiting");
           },
           () => {
@@ -245,7 +332,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
             orbBeatTimer.current = setTimeout(() => setOrbBeat(false), 130);
           },
         );
-        return; // phase managed by speak callback
+        return;
       }
     } catch {
       const errMsg = "Sorry, I couldn't reach Gemini.";
@@ -258,7 +345,6 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
         return;
       }
     } finally {
-      // In voice mode, phase transitions are handled by the speak() callback above
       if (modeRef.current !== "voice") {
         setPhase("waiting");
       }
@@ -285,93 +371,91 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
     await sendToGemini(text, image);
   }, [sendToGemini]);
 
-  // Always-on speech recognition loop
-  useEffect(() => {
-    if (!SpeechRecognition) return;
-    let stopped = false;
+  // ── Unified speech handler (works for both backend and browser sources) ────
 
-    function startRecognizer() {
-      if (stopped) return;
-      const r = new SpeechRecognition();
-      r.continuous = true;
-      r.interimResults = true;
-      r.lang = "en-US";
+  const handleFinal = useCallback((text: string) => {
+    const lower = text.toLowerCase().trim();
+    if (!lower) return;
 
-      r.onresult = (e: any) => {
-        if (phaseRef.current === "processing") return;
+    if (phaseRef.current === "processing") return;
 
-        let interim = "";
-        let final_ = "";
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) final_ += t;
-          else interim += t;
-        }
-
-        // While speaking, only watch for the wake phrase to interrupt
-        if (phaseRef.current === "speaking") {
-          const combined = (interim + final_).toLowerCase();
-          if (combined.includes(WAKE_PHRASE)) {
-            speakIdRef.current++; // invalidate the active speak's onEnd before cancelling
-            window.speechSynthesis.cancel();
-            if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
-            setOrbBeat(false);
-            setPhase("listening");
-            setInterimText("");
-          }
-          return;
-        }
-
-        // Only show interim text once wake word has been said
-        if (interim && phaseRef.current === "listening") setInterimText(interim);
-
-        if (final_) {
-          setInterimText("");
-          const lower = final_.toLowerCase().trim();
-
-          if (phaseRef.current === "waiting") {
-            if (lower.includes(WAKE_PHRASE)) {
-              const afterWake = final_.substring(lower.indexOf(WAKE_PHRASE) + WAKE_PHRASE.length).trim();
-              // Require at least 3 chars to avoid sending trailing sounds ("s", "ss")
-              if (afterWake.length >= 3) {
-                setPhase("processing");
-                handleUtterance(afterWake);
-              } else {
-                setPhase("listening");
-              }
-            }
-          } else if (phaseRef.current === "listening") {
-            const utterance = final_.trim();
-            // Ignore stray sounds left over from the wake word
-            if (utterance.length >= 3) {
-              setPhase("processing");
-              handleUtterance(utterance);
-            }
-          }
-        }
-      };
-
-      r.onend = () => {
-        if (stopped) return;
-        if (phaseRef.current === "listening") setPhase("waiting");
-        setTimeout(startRecognizer, 300);
-      };
-
-      r.onerror = (e: any) => {
-        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-          stopped = true;
-        }
-      };
-
-      recogRef.current = r;
-      try { r.start(); } catch { /* */ }
+    if (phaseRef.current === "speaking") {
+      if (lower.includes(WAKE_PHRASE)) {
+        speakIdRef.current++;
+        window.speechSynthesis?.cancel();
+        if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
+        setOrbBeat(false);
+        setPhase("listening");
+        setInterimText("");
+      }
+      return;
     }
 
-    startRecognizer();
-    return () => { stopped = true; recogRef.current?.stop(); };
+    if (phaseRef.current === "waiting") {
+      if (lower.includes(WAKE_PHRASE)) {
+        const afterWake = text.substring(lower.indexOf(WAKE_PHRASE) + WAKE_PHRASE.length).trim();
+        if (afterWake.length >= 3) {
+          setPhase("processing");
+          setInterimText("");
+          handleUtterance(afterWake);
+        } else {
+          setPhase("listening");
+        }
+      }
+    } else if (phaseRef.current === "listening") {
+      const utterance = text.trim();
+      if (utterance.length >= 3) {
+        setPhase("processing");
+        setInterimText("");
+        handleUtterance(utterance);
+      }
+    }
   }, [handleUtterance]);
 
-  if (!SpeechRecognition) {
+  const handlePartial = useCallback((text: string) => {
+    if (phaseRef.current === "processing") return;
+
+    if (phaseRef.current === "speaking") {
+      if (text.toLowerCase().includes(WAKE_PHRASE)) {
+        speakIdRef.current++;
+        window.speechSynthesis?.cancel();
+        if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
+        setOrbBeat(false);
+        setPhase("listening");
+        setInterimText("");
+      }
+      return;
+    }
+
+    if (phaseRef.current === "listening") {
+      setInterimText(text);
+    }
+  }, []);
+
+  // ── Connect to the appropriate speech source ───────────────────────────────
+
+  useBackendSpeech(
+    useBackend === true ? handleFinal : () => {},
+    useBackend === true ? handlePartial : () => {},
+  );
+
+  useBrowserSpeech(
+    useBackend === false ? handleFinal : () => {},
+    useBackend === false ? handlePartial : () => {},
+    phaseRef,
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (useBackend === null) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-white/30">
+        Connecting…
+      </div>
+    );
+  }
+
+  if (!useBackend && !BrowserSpeechRecognition) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-white/30">
         Voice not supported in this browser
@@ -379,14 +463,13 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
     );
   }
 
-  // ── Voice-only mode ──
   if (mode === "voice") {
     return (
       <VoiceOnlyView phase={phase} interimText={interimText} orbBeat={orbBeat} />
     );
   }
 
-  // ── Chat mode ────────────────────────────────────────────────────────────────
+  // ── Chat mode ──────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
       <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto p-3">

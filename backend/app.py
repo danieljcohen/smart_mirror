@@ -21,6 +21,7 @@ from auth import auth_bp
 from gemini import gemini_bp
 import face_store
 import gesture_service
+import speech_service
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -268,6 +269,36 @@ def gesture_heartbeat():
     """Mark reels widget as active for gesture tracking."""
     gesture_service.mark_reels_active_heartbeat()
     return jsonify({"status": "ok"})
+
+
+# ── Speech recognition endpoints ────────────────────────────────────
+
+@app.get("/speech/available")
+def speech_available():
+    """Whether the backend speech service (Vosk) is running."""
+    return jsonify({"available": speech_service.available()})
+
+@app.get("/speech/stream")
+def speech_stream():
+    """SSE stream of speech recognition events from the Pi's microphone."""
+    def stream():
+        q = speech_service.subscribe()
+        try:
+            while True:
+                event = q.get()
+                yield f"data: {json.dumps(event)}\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            speech_service.unsubscribe(q)
+
+    return Response(stream(), mimetype="text/event-stream")
+
+@app.get("/speech/consume")
+def speech_consume():
+    """Return and clear the latest speech event."""
+    event = speech_service.consume_event()
+    return jsonify(event if event else {})
 
 
 # ── Snapshot endpoint ────────────────────────────────────────────────
@@ -713,6 +744,9 @@ if __name__ == "__main__":
     # Start gesture monitoring
     gt = threading.Thread(target=gesture_service.gesture_monitor_loop, args=(get_camera,), daemon=True)
     gt.start()
+
+    # Start speech recognition (Vosk — Linux/Pi only)
+    speech_service.start()
 
     get_camera()
     app.run(host="0.0.0.0", port=3000, debug=False)
