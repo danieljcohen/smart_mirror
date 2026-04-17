@@ -44,13 +44,7 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
         const d = JSON.parse(typeof e.data === "string" ? e.data : "{}");
         if (d.event === "onStateChange") {
           if (d.info === 1) {
-            // Video started playing — unmute now
-            iframeRef.current?.contentWindow?.postMessage(
-              JSON.stringify({ event: "command", func: "unMute", args: [] }), "*",
-            );
-            iframeRef.current?.contentWindow?.postMessage(
-              JSON.stringify({ event: "command", func: "setVolume", args: [100] }), "*",
-            );
+            // noop — unmuting programmatically pauses muted-autoplay videos
           }
           if (d.info === 0) {
             // Video ended — go to next

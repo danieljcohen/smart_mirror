@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
-const POLL_MS = 3_000;
+const POLL_MS = 4_000;
 // Number of consecutive missed polls before clearing the recognized person.
 // At 3s per poll, 10 misses = 30 seconds of nobody detected before giving up.
 const MISS_THRESHOLD = 10;
