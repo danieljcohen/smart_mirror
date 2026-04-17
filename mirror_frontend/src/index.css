@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+body {
+  font-family: system-ui, -apple-system, sans-serif, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji";
+}
+
 @theme {
   --animate-fade-in: fade-in 0.8s ease-out;
 }
