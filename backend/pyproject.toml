@@ -30,7 +30,9 @@ build-backend = "hatchling.build"
 only-include = ["app.py", "db.py", "auth.py", "face_store.py"]
 
 [tool.uv]
-# tflite-runtime has no wheels for Python 3.12+; our code falls back to onnxruntime
+# tflite-runtime only has Linux wheels and only for Python <3.12;
+# our code falls back to onnxruntime on all other platforms.
 override-dependencies = [
-    "tflite-runtime>=2.14; python_version < '3.12'",
+    "tflite-runtime>=2.14; python_version < '3.12' and sys_platform == 'linux'",
 ]
+environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]

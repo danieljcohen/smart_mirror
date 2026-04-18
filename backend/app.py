@@ -317,7 +317,7 @@ def tts():
     try:
         dg_resp = http_requests.post(
             "https://api.deepgram.com/v1/speak",
-            params={"model": "aura-2-thalia-en"},
+            params={"model": "aura-2-orion-en"},
             headers={
                 "Authorization": f"Token {DEEPGRAM_API_KEY}",
                 "Content-Type": "application/json",
