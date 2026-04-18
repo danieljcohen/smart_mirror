@@ -53,6 +53,18 @@ registerWidget({
       type: "text",
       placeholder: "e.g. cooking, travel",
     },
+    {
+      key: "quality",
+      label: "Video Quality",
+      type: "select",
+      options: [
+        { value: "tiny", label: "Tiny (144p) — lightest" },
+        { value: "small", label: "Small (240p) — recommended for Pi" },
+        { value: "medium", label: "Medium (360p)" },
+        { value: "large", label: "Large (480p)" },
+        { value: "hd720", label: "HD 720p" },
+      ],
+    },
   ],
 });
 

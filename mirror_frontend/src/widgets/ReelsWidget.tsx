@@ -19,10 +19,16 @@ for (const origin of [
   }
 }
 
+const YT_PLAYER_ID = "yt-reels";
+// Valid YouTube quality levels (lowest → highest):
+//   tiny, small (240p), medium (360p), large (480p), hd720, hd1080, highres, default
+const DEFAULT_QUALITY = "small";
+
 function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const sourceType = config?.source_type ?? "trending";
   const channelId = config?.channel_id ?? "";
   const searchQuery = config?.search_query ?? "";
+  const quality = config?.quality ?? DEFAULT_QUALITY;
 
   const [videoIds, setVideoIds] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
@@ -42,21 +48,28 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
       if (e.origin !== "https://www.youtube.com") return;
       try {
         const d = JSON.parse(typeof e.data === "string" ? e.data : "{}");
-        if (d.event === "onStateChange") {
-          if (d.info === 1) {
-            // noop — unmuting programmatically pauses muted-autoplay videos
-          }
-          if (d.info === 0) {
-            // Video ended — go to next
-            advance();
-          }
+        if (d.event === "onReady") {
+          // Hint the player to use the configured low quality.
+          iframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({
+              event: "command",
+              func: "setPlaybackQuality",
+              args: [quality],
+              id: YT_PLAYER_ID,
+            }),
+            "https://www.youtube.com",
+          );
+        }
+        if (d.event === "onStateChange" && d.info === 0) {
+          // Video ended — go to next
+          advance();
         }
       } catch { /* ignore malformed messages */ }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [quality]);
 
   // Fallback timer — advance even if the end event never fires
   useEffect(() => {
@@ -116,7 +129,8 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
 
   const onIframeLoad = () => {
     iframeRef.current?.contentWindow?.postMessage(
-      JSON.stringify({ event: "listening", id: "yt-reels" }), "*",
+      JSON.stringify({ event: "listening", id: YT_PLAYER_ID }),
+      "https://www.youtube.com",
     );
   };
 
@@ -173,7 +187,7 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   const src =
     `https://www.youtube.com/embed/${videoId}` +
     `?autoplay=1&mute=1&controls=0&rel=0&modestbranding=1` +
-    `&playsinline=1&enablejsapi=1&fs=0`;
+    `&playsinline=1&enablejsapi=1&fs=0&vq=${encodeURIComponent(quality)}`;
 
   return (
     <div className="h-full w-full overflow-hidden bg-black">
@@ -218,6 +232,18 @@ registerWidget({
       label: "Search Query",
       type: "text",
       placeholder: "e.g. cooking, travel",
+    },
+    {
+      key: "quality",
+      label: "Video Quality",
+      type: "select",
+      options: [
+        { value: "tiny", label: "Tiny (144p) — lightest" },
+        { value: "small", label: "Small (240p) — recommended for Pi" },
+        { value: "medium", label: "Medium (360p)" },
+        { value: "large", label: "Large (480p)" },
+        { value: "hd720", label: "HD 720p" },
+      ],
     },
   ],
 });
