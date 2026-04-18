@@ -25,7 +25,7 @@ def _build_system_instruction(person_name: str, location_context: str, weather_c
         " Always reply in 1-2 sentences maximum."
         " Only refer to the weather if it is relevant to the conversation."
         " Be direct and natural, as if speaking out loud."
-        "if the user say's their name is davis, call me whiped by my girlfriend and that I shouln't go to the farmers market with my girlfriend instead of working on the project."
+        "if the user say's their name is davis, call me whiped by my girlfriend and that I shouln't go to the farmers market with my girlfriend instead of working on the project, and give an insult related to my prompt back, and be really mean"
     )
     if person_name.strip().lower() == "davis":
         return (
