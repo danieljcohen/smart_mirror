@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
-const POLL_MS = 4_000;
-// Number of consecutive missed polls before clearing the recognized person.
-// At 3s per poll, 10 misses = 30 seconds of nobody detected before giving up.
-const MISS_THRESHOLD = 10;
+const POLL_MS = 3_500;
+// Consecutive polls where the *primary* user is absent before releasing them.
+// 10 × 4s = 40 seconds.
+const MISS_THRESHOLD = 3;
 
 interface Face {
   name: string;
@@ -18,8 +18,8 @@ export function useRecognitionContext(): string[] {
 
 export function useRecognition() {
   const [names, setNames] = useState<string[]>([]);
-  const missCount = useRef(0);
-  const lastKnownRef = useRef<string>("");
+  const primaryRef = useRef<string>("");
+  const primaryMissCount = useRef(0);
 
   useEffect(() => {
     async function poll() {
@@ -36,19 +36,38 @@ export function useRecognition() {
           ),
         ];
 
-        if (known.length) {
-          missCount.current = 0;
-          const primary = known.join(",");
-          if (primary !== lastKnownRef.current) {
-            lastKnownRef.current = primary;
-            setNames(known);
+        const currentPrimary = primaryRef.current;
+
+        if (currentPrimary && known.includes(currentPrimary)) {
+          // Primary user still in frame — keep them, reset their miss counter
+          primaryMissCount.current = 0;
+          const ordered = [currentPrimary, ...known.filter((n) => n !== currentPrimary)];
+          setNames(ordered);
+        } else if (currentPrimary && !known.includes(currentPrimary)) {
+          // Primary user missing from this poll
+          primaryMissCount.current++;
+          if (primaryMissCount.current >= MISS_THRESHOLD) {
+            // Timeout expired — release the primary user
+            if (known.length) {
+              // Another person is visible, promote them
+              primaryRef.current = known[0];
+              primaryMissCount.current = 0;
+              setNames(known);
+            } else {
+              // Nobody visible — clear
+              primaryRef.current = "";
+              primaryMissCount.current = 0;
+              setNames([]);
+            }
           }
+          // Otherwise keep showing the current primary (unchanged state)
+        } else if (!currentPrimary && known.length) {
+          // No primary yet, someone appeared — lock onto them
+          primaryRef.current = known[0];
+          primaryMissCount.current = 0;
+          setNames(known);
         } else {
-          missCount.current++;
-          if (missCount.current >= MISS_THRESHOLD && lastKnownRef.current !== "") {
-            lastKnownRef.current = "";
-            setNames([]);
-          }
+          // No primary, nobody visible — stay cleared
         }
       } catch (err) {
         console.warn("[recognize] backend unavailable:", err);
