@@ -16,43 +16,60 @@ const CLEAR_PHRASES = ["clear chat", "new conversation", "start over", "reset ch
 const BrowserSpeechRecognition =
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
+let _ttsAudio: HTMLAudioElement | null = null;
+
+function stopSpeaking() {
+  if (_ttsAudio) {
+    _ttsAudio.pause();
+    _ttsAudio = null;
+  }
+}
+
 function speak(
   text: string,
   onEnd?: () => void,
   onBoundary?: () => void,
 ) {
-  const synth = window.speechSynthesis;
-  if (!synth) { onEnd?.(); return; }
+  stopSpeaking();
 
-  synth.cancel();
+  fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error("TTS request failed");
+      return res.blob();
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      _ttsAudio = audio;
 
-  setTimeout(() => {
-    synth.resume();
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        if (iv) clearInterval(iv);
+        URL.revokeObjectURL(url);
+        _ttsAudio = null;
+        onEnd?.();
+      };
 
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    u.pitch = 1.0;
-    u.volume = 1.0;
-    if (onBoundary) u.onboundary = onBoundary;
+      audio.onended = done;
+      audio.onerror = () => { console.warn("[jarvis] TTS playback error"); done(); };
 
-    let finished = false;
-    const done = () => {
-      if (finished) return;
-      finished = true;
-      clearInterval(hb);
-      onEnd?.();
-    };
-    u.onend = done;
-    u.onerror = (e) => { console.warn("[jarvis] TTS error:", e.error); done(); };
+      let iv: ReturnType<typeof setInterval> | null = null;
+      if (onBoundary) {
+        iv = setInterval(() => {
+          if (!_ttsAudio || audio.paused || audio.ended) { if (iv) clearInterval(iv); return; }
+          onBoundary();
+        }, 200);
+      }
 
-    synth.speak(u);
-
-    const hb = setInterval(() => {
-      if (!synth.speaking) { done(); return; }
-      synth.pause();
-      synth.resume();
-    }, 5000);
-  }, 100);
+      audio.play().catch(() => done());
+    })
+    .catch(() => onEnd?.());
 }
 
 async function captureSnapshot(): Promise<string | null> {
@@ -174,16 +191,22 @@ function VoiceOnlyView({
   );
 }
 
-// ── Backend speech hook (Vosk via SSE) ───────────────────────────────────────
+// ── Backend speech hook (openWakeWord + Deepgram via SSE) ────────────────────
 
 function useBackendSpeech(
-  onFinal: (text: string) => void,
+  onWake: () => void,
   onPartial: (text: string) => void,
+  onCommand: (text: string) => void,
+  onTimeout: () => void,
 ) {
-  const onFinalRef = useRef(onFinal);
+  const onWakeRef = useRef(onWake);
   const onPartialRef = useRef(onPartial);
-  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+  const onCommandRef = useRef(onCommand);
+  const onTimeoutRef = useRef(onTimeout);
+  useEffect(() => { onWakeRef.current = onWake; }, [onWake]);
   useEffect(() => { onPartialRef.current = onPartial; }, [onPartial]);
+  useEffect(() => { onCommandRef.current = onCommand; }, [onCommand]);
+  useEffect(() => { onTimeoutRef.current = onTimeout; }, [onTimeout]);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -194,8 +217,10 @@ function useBackendSpeech(
       es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data.type === "final") onFinalRef.current(data.text);
+          if (data.type === "wake") onWakeRef.current();
           else if (data.type === "partial") onPartialRef.current(data.text);
+          else if (data.type === "command") onCommandRef.current(data.text);
+          else if (data.type === "timeout") onTimeoutRef.current();
         } catch { /* ignore */ }
       };
       es.onerror = () => {
@@ -371,9 +396,45 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
     await sendToGemini(text, image);
   }, [sendToGemini]);
 
-  // ── Unified speech handler (works for both backend and browser sources) ────
+  // ── Backend speech handlers (openWakeWord + Deepgram) ───────────────────────
 
-  const handleFinal = useCallback((text: string) => {
+  const handleWake = useCallback(() => {
+    if (phaseRef.current === "processing") return;
+    if (phaseRef.current === "speaking") {
+      speakIdRef.current++;
+      stopSpeaking();
+      if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
+      setOrbBeat(false);
+    }
+    setPhase("listening");
+    setInterimText("");
+  }, []);
+
+  const handleBackendPartial = useCallback((text: string) => {
+    if (phaseRef.current === "listening") {
+      setInterimText(text);
+    }
+  }, []);
+
+  const handleCommand = useCallback((text: string) => {
+    if (!text.trim()) {
+      setPhase("waiting");
+      setInterimText("");
+      return;
+    }
+    setPhase("processing");
+    setInterimText("");
+    handleUtterance(text);
+  }, [handleUtterance]);
+
+  const handleTimeout = useCallback(() => {
+    setPhase("waiting");
+    setInterimText("");
+  }, []);
+
+  // ── Browser speech handlers (Web Speech API fallback) ──────────────────────
+
+  const handleBrowserFinal = useCallback((text: string) => {
     const lower = text.toLowerCase().trim();
     if (!lower) return;
 
@@ -382,7 +443,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
     if (phaseRef.current === "speaking") {
       if (lower.includes(WAKE_PHRASE)) {
         speakIdRef.current++;
-        window.speechSynthesis?.cancel();
+        stopSpeaking();
         if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
         setOrbBeat(false);
         setPhase("listening");
@@ -412,13 +473,13 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
     }
   }, [handleUtterance]);
 
-  const handlePartial = useCallback((text: string) => {
+  const handleBrowserPartial = useCallback((text: string) => {
     if (phaseRef.current === "processing") return;
 
     if (phaseRef.current === "speaking") {
       if (text.toLowerCase().includes(WAKE_PHRASE)) {
         speakIdRef.current++;
-        window.speechSynthesis?.cancel();
+        stopSpeaking();
         if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
         setOrbBeat(false);
         setPhase("listening");
@@ -435,13 +496,15 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
   // ── Connect to the appropriate speech source ───────────────────────────────
 
   useBackendSpeech(
-    useBackend === true ? handleFinal : () => {},
-    useBackend === true ? handlePartial : () => {},
+    useBackend === true ? handleWake : () => {},
+    useBackend === true ? handleBackendPartial : () => {},
+    useBackend === true ? handleCommand : () => {},
+    useBackend === true ? handleTimeout : () => {},
   );
 
   useBrowserSpeech(
-    useBackend === false ? handleFinal : () => {},
-    useBackend === false ? handlePartial : () => {},
+    useBackend === false ? handleBrowserFinal : () => {},
+    useBackend === false ? handleBrowserPartial : () => {},
     phaseRef,
   );
 

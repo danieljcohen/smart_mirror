@@ -300,6 +300,38 @@ def speech_consume():
     return jsonify(event if event else {})
 
 
+# ── Text-to-speech endpoint (Deepgram Aura) ─────────────────────────
+
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+
+@app.post("/tts")
+def tts():
+    """Generate speech audio from text via Deepgram TTS."""
+    body = request.get_json(silent=True) or {}
+    text = body.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "no text provided"}), 400
+    if not DEEPGRAM_API_KEY:
+        return jsonify({"error": "DEEPGRAM_API_KEY not configured"}), 500
+
+    try:
+        dg_resp = http_requests.post(
+            "https://api.deepgram.com/v1/speak",
+            params={"model": "aura-2-thalia-en"},
+            headers={
+                "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={"text": text},
+            timeout=10,
+        )
+        dg_resp.raise_for_status()
+        return Response(dg_resp.content, mimetype="audio/mpeg")
+    except Exception as e:
+        logger.error("Deepgram TTS error: %s", e)
+        return jsonify({"error": str(e)}), 502
+
+
 # ── Snapshot endpoint ────────────────────────────────────────────────
 
 @app.get("/snapshot")
