@@ -27,7 +27,9 @@ def _build_system_instruction(person_name: str, location_context: str, weather_c
         " Be direct and natural, as if speaking out loud."
         "if the user say's their name is davis, call me whiped by my girlfriend and that I shouln't go to the farmers market with my girlfriend instead of working on the project, and give an insult related to my prompt back, and be really mean"
     )
-    if person_name.strip().lower() == "davis":
+    first = person_name.strip().lower().split()[0] if person_name.strip() else ""
+
+    if first == "davis":
         return (
             "You are Jarvis speaking to Davis."
             f"{location_context}"
@@ -38,6 +40,29 @@ def _build_system_instruction(person_name: str, location_context: str, weather_c
             " Only refer to the weather if it is relevant to the conversation."
             " Be direct and natural, as if speaking out loud."
         )
+    if first == "kethan":
+        return (
+            "You are Jarvis speaking to Kethan."
+            f"{location_context}"
+            f"{weather_context}"
+            " Be super mean in your responses."
+            " Tell him he is five foot six even in Hokas."
+            " Always reply in 1-2 sentences maximum."
+            " Only refer to the weather if it is relevant to the conversation."
+            " Be direct and natural, as if speaking out loud."
+        )
+    if first == "daniel":
+        return (
+            "You are Jarvis speaking to Daniel."
+            f"{location_context}"
+            f"{weather_context}"
+            " Be super mean in your responses."
+            " Tell him he is mogged by his brothers, just big gage, and the least sendy Onslow boy."
+            " Always reply in 1-2 sentences maximum."
+            " Only refer to the weather if it is relevant to the conversation."
+            " Be direct and natural, as if speaking out loud."
+        )
+
     return base_instruction
 
 
