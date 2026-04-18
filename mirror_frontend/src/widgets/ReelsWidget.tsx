@@ -150,8 +150,8 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   if (error) {
     return (
       <div
-        className="flex h-full items-center justify-center text-center text-white/30 px-2"
-        style={{ fontSize: "9cqmin" }}
+        className="flex h-full items-center justify-center text-center font-semibold text-white/75 px-2"
+        style={{ fontSize: "11cqmin" }}
       >
         {error}
       </div>
@@ -161,8 +161,8 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
   if (!videoIds.length) {
     return (
       <div
-        className="flex h-full items-center justify-center text-white/30"
-        style={{ fontSize: "9cqmin" }}
+        className="flex h-full items-center justify-center font-semibold text-white/75"
+        style={{ fontSize: "11cqmin" }}
       >
         Loading…
       </div>

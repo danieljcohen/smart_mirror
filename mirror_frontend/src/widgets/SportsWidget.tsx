@@ -57,11 +57,11 @@ function ScoreRow({ game }: { game: Game }) {
       </span>
       {/* Scores / vs */}
       {pre || !hasScore ? (
-        <span className="flex-1 text-center text-white/40" style={{ fontSize: "6cqmin" }}>vs</span>
+        <span className="flex-1 text-center font-semibold text-white/80" style={{ fontSize: "7cqmin" }}>vs</span>
       ) : (
         <span className="flex-1 text-center tabular-nums text-white" style={{ fontSize: "7cqmin" }}>
           {game.awayScore}
-          <span className="mx-1 text-white/30">–</span>
+          <span className="mx-1 text-white/65">–</span>
           {game.homeScore}
         </span>
       )}
@@ -71,8 +71,8 @@ function ScoreRow({ game }: { game: Game }) {
       </span>
       {/* Status */}
       <span
-        className={`w-16 truncate text-right ${live ? "text-green-400" : "text-white/40"}`}
-        style={{ fontSize: "5cqmin" }}
+        className={`w-16 truncate text-right font-semibold ${live ? "text-green-400" : "text-white/85"}`}
+        style={{ fontSize: "6cqmin" }}
       >
         {live && <span className="mr-0.5 inline-block h-1.5 w-1.5 rounded-full bg-green-400" />}
         {game.status}
@@ -108,7 +108,7 @@ function SportsWidget({ config }: { config?: Record<string, string> }) {
   if (error) {
     return (
       <div className="flex h-full items-center justify-center">
-        <span className="text-white/25" style={{ fontSize: "6cqmin" }}>Could not load scores</span>
+        <span className="font-semibold text-white/75" style={{ fontSize: "7cqmin" }}>Could not load scores</span>
       </div>
     );
   }
@@ -116,10 +116,10 @@ function SportsWidget({ config }: { config?: Record<string, string> }) {
   if (!games.length) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1">
-        <span className="font-semibold uppercase tracking-widest text-white/30" style={{ fontSize: "5cqmin" }}>
+        <span className="font-bold uppercase tracking-widest text-white/80" style={{ fontSize: "6cqmin" }}>
           {label || league.toUpperCase()}
         </span>
-        <span className="text-white/20" style={{ fontSize: "5.5cqmin" }}>No games today</span>
+        <span className="font-semibold text-white/70" style={{ fontSize: "6.5cqmin" }}>No games today</span>
       </div>
     );
   }
@@ -129,8 +129,8 @@ function SportsWidget({ config }: { config?: Record<string, string> }) {
       {/* League header */}
       <div className="mb-1 flex items-center justify-between">
         <span
-          className="font-bold uppercase tracking-widest text-white/50"
-          style={{ fontSize: "4.5cqmin" }}
+          className="font-bold uppercase tracking-widest text-white/85"
+          style={{ fontSize: "5.5cqmin" }}
         >
           {label}
         </span>

@@ -63,7 +63,7 @@ function NewsWidget({ config }: { config?: Record<string, string> }) {
   if (!headlines.length) {
     return (
       <div className="flex h-full w-full items-center justify-center">
-        <span className="text-white/25" style={{ fontSize: "6cqmin" }}>Loading news…</span>
+        <span className="font-semibold text-white/75" style={{ fontSize: "7cqmin" }}>Loading news…</span>
       </div>
     );
   }
@@ -73,8 +73,8 @@ function NewsWidget({ config }: { config?: Record<string, string> }) {
       {/* Source label + dot */}
       <div className="mb-1 flex items-center gap-1.5">
         <span
-          className="rounded-sm bg-white/15 px-1.5 py-0.5 font-semibold uppercase tracking-widest text-white/60"
-          style={{ fontSize: "4cqmin" }}
+          className="rounded-sm bg-white/25 px-1.5 py-0.5 font-bold uppercase tracking-widest text-white/95"
+          style={{ fontSize: "5cqmin" }}
         >
           {headline?.source ?? ""}
         </span>
@@ -96,9 +96,9 @@ function NewsWidget({ config }: { config?: Record<string, string> }) {
 
       {/* Headline text — fades between items */}
       <p
-        className="leading-snug text-white transition-opacity"
+        className="font-medium leading-snug text-white/95 transition-opacity"
         style={{
-          fontSize:   "7cqmin",
+          fontSize:   "7.5cqmin",
           opacity:    visible ? 1 : 0,
           transition: `opacity ${FADE_MS}ms ease-in-out`,
           display:    "-webkit-box",

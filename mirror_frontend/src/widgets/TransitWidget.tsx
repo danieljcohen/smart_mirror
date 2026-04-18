@@ -121,7 +121,7 @@ function Transit({ config }: { config?: Record<string, string> }) {
 
   if (!workAddress) {
     return (
-      <div className="flex h-full items-center justify-center text-white/30 text-center px-2" style={{ fontSize: "9cqmin" }}>
+      <div className="flex h-full items-center justify-center text-center font-semibold text-white/75 px-2" style={{ fontSize: "10cqmin" }}>
         Set work address in configure app
       </div>
     );
@@ -129,7 +129,7 @@ function Transit({ config }: { config?: Record<string, string> }) {
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center text-white/30 text-center px-2" style={{ fontSize: "9cqmin" }}>
+      <div className="flex h-full items-center justify-center text-center font-semibold text-white/75 px-2" style={{ fontSize: "10cqmin" }}>
         {error}
       </div>
     );
@@ -137,7 +137,7 @@ function Transit({ config }: { config?: Record<string, string> }) {
 
   if (!result) {
     return (
-      <div className="flex h-full items-center justify-center text-white/30" style={{ fontSize: "9cqmin" }}>
+      <div className="flex h-full items-center justify-center font-semibold text-white/75" style={{ fontSize: "10cqmin" }}>
         Loading…
       </div>
     );
@@ -152,7 +152,7 @@ function Transit({ config }: { config?: Record<string, string> }) {
           <div className="font-light text-white/90" style={{ fontSize: "13cqmin" }}>
             {result.durationText}
           </div>
-          <div className="text-white/40" style={{ fontSize: "8cqmin" }}>
+          <div className="font-semibold text-white/80" style={{ fontSize: "9.5cqmin" }}>
             {result.distanceText} to work
           </div>
         </div>
@@ -178,7 +178,7 @@ function Transit({ config }: { config?: Record<string, string> }) {
               </span>
               {/* Departure times */}
               {l.departureTimes && l.departureTimes.length > 0 && (
-                <span className="text-white/60 tracking-tight" style={{ fontSize: "8cqmin" }}>
+                <span className="font-semibold tracking-tight text-white/90" style={{ fontSize: "9.5cqmin" }}>
                   {l.departureTimes.join(" · ")}
                 </span>
               )}

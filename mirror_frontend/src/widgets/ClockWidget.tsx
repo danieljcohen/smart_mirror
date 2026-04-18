@@ -20,10 +20,10 @@ function Clock(_: { config?: Record<string, string> }) {
   });
 
   return (
-    <div className="flex h-full items-center text-white/90">
+    <div className="flex h-full items-center text-white/95">
       <div>
         <div className="font-extralight tracking-tight" style={{ fontSize: "30cqmin" }}>{time}</div>
-        <div className="font-light text-white/50" style={{ fontSize: "11cqmin" }}>{date}</div>
+        <div className="font-semibold text-white/85" style={{ fontSize: "13cqmin" }}>{date}</div>
       </div>
     </div>
   );

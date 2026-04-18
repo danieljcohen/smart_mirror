@@ -155,19 +155,19 @@ function VoiceOnlyView({
         style={{ opacity: active ? 1 : 0 }}
       >
         {isListening && !interimText && (
-          <span className="text-white/55" style={{ fontSize: "7cqmin" }}>Listening…</span>
+          <span className="font-semibold text-white/90" style={{ fontSize: "8.5cqmin" }}>Listening…</span>
         )}
         {isListening && interimText && (
-          <span className="italic text-white/75" style={{ fontSize: "7cqmin" }}>{interimText}</span>
+          <span className="font-medium italic text-white/95" style={{ fontSize: "8.5cqmin" }}>{interimText}</span>
         )}
         {isThinking && (
-          <span className="text-white/55" style={{ fontSize: "7cqmin" }}>Thinking…</span>
+          <span className="font-semibold text-white/90" style={{ fontSize: "8.5cqmin" }}>Thinking…</span>
         )}
       </div>
 
       {!active && (
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-white/15" style={{ fontSize: "7cqmin" }}>Say "Hey Jarvis"</span>
+          <span className="font-semibold text-white/65" style={{ fontSize: "8.5cqmin" }}>Say "Hey Jarvis"</span>
         </div>
       )}
     </div>
@@ -449,7 +449,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
 
   if (useBackend === null) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-white/30">
+      <div className="flex h-full items-center justify-center text-base font-semibold text-white/75">
         Connecting…
       </div>
     );
@@ -457,7 +457,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
 
   if (!useBackend && !BrowserSpeechRecognition) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-white/30">
+      <div className="flex h-full items-center justify-center text-center text-base font-semibold text-white/75">
         Voice not supported in this browser
       </div>
     );
@@ -474,10 +474,10 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
       <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto p-3">
         {messages.length === 0 && phase === "waiting" && (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-white/20">
-            <MicIcon className="h-8 w-8" />
-            <span className="text-sm">Say &ldquo;Hey Jarvis&rdquo; to start</span>
-            <span className="text-xs text-white/15">
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-white/80">
+            <MicIcon className="h-9 w-9 opacity-90" />
+            <span className="text-base font-semibold">Say &ldquo;Hey Jarvis&rdquo; to start</span>
+            <span className="text-sm font-medium text-white/70">
               &ldquo;take a picture&rdquo; for camera &middot; &ldquo;clear chat&rdquo; to reset
             </span>
           </div>
@@ -485,8 +485,8 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
-                m.role === "user" ? "bg-blue-600/40 text-white/90" : "bg-white/10 text-white/80"
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-base font-medium leading-relaxed ${
+                m.role === "user" ? "bg-blue-600/50 text-white" : "bg-white/15 text-white/95"
               }`}
             >
               {m.image && <img src={m.image} alt="captured" className="mb-1.5 max-h-24 rounded" />}
@@ -496,7 +496,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
         ))}
         {phase === "processing" && (
           <div className="flex justify-start">
-            <div className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white/50">
+            <div className="rounded-lg bg-white/15 px-3 py-2 text-base font-semibold text-white/85">
               <span className="inline-flex gap-1">
                 <span className="animate-bounce">.</span>
                 <span className="animate-bounce" style={{ animationDelay: "0.15s" }}>.</span>
@@ -510,16 +510,16 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
       <div className="flex items-center justify-center gap-2 border-t border-white/10 px-3 py-2">
         <StatusIndicator phase={phase} />
         {phase === "waiting" && !interimText && (
-          <span className="text-xs text-white/25">Listening for &ldquo;Hey Jarvis&rdquo;</span>
+          <span className="text-sm font-semibold text-white/80">Listening for &ldquo;Hey Jarvis&rdquo;</span>
         )}
         {phase === "listening" && !interimText && (
-          <span className="text-xs text-white/50">Listening&hellip;</span>
+          <span className="text-sm font-semibold text-white/90">Listening&hellip;</span>
         )}
         {phase === "processing" && (
-          <span className="text-xs text-white/40">Thinking&hellip;</span>
+          <span className="text-sm font-semibold text-white/85">Thinking&hellip;</span>
         )}
         {interimText && (
-          <span className="truncate text-xs italic text-white/40">{interimText}</span>
+          <span className="truncate text-sm font-medium italic text-white/85">{interimText}</span>
         )}
       </div>
     </div>

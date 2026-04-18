@@ -7,8 +7,8 @@ function HourlyWeather(_: { config?: Record<string, string> }) {
   if (!slots) {
     return (
       <div
-        className="flex h-full items-center justify-center text-white/30"
-        style={{ fontSize: "9cqmin" }}
+        className="flex h-full items-center justify-center font-semibold text-white/75"
+        style={{ fontSize: "10cqmin" }}
       >
         Loading…
       </div>
@@ -25,15 +25,15 @@ function HourlyWeather(_: { config?: Record<string, string> }) {
           }`}
         >
           <span
-            className={slot.isCurrent ? "text-white/90" : "text-white/40"}
-            style={{ fontSize: "6cqmin" }}
+            className={slot.isCurrent ? "font-semibold text-white/95" : "font-semibold text-white/80"}
+            style={{ fontSize: "7cqmin" }}
           >
             {slot.label}
           </span>
           <span style={{ fontSize: "10cqmin", lineHeight: 1.1 }}>{slot.icon}</span>
           <span
-            className={`font-light ${slot.isCurrent ? "text-white" : "text-white/70"}`}
-            style={{ fontSize: "8cqmin" }}
+            className={slot.isCurrent ? "font-semibold text-white" : "font-medium text-white/90"}
+            style={{ fontSize: "9cqmin" }}
           >
             {slot.temp}°
           </span>

@@ -12,7 +12,7 @@ function Greeting(_: { config?: Record<string, string> }) {
 
   if (!names.length) {
     return (
-      <div className="flex h-full items-center justify-center text-white/20 font-light" style={{ fontSize: "12cqmin" }}>
+      <div className="flex h-full items-center justify-center font-medium text-white/75" style={{ fontSize: "14cqmin" }}>
         Waiting for someone...
       </div>
     );

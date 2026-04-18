@@ -9,7 +9,7 @@ export function WidgetRenderer({ widgetId, config }: WidgetRendererProps) {
   const def = getWidget(widgetId);
   if (!def) {
     return (
-      <div className="flex h-full items-center justify-center text-white/20 text-xs">
+      <div className="flex h-full items-center justify-center text-center text-sm font-semibold text-white/75">
         Unknown widget: {widgetId}
       </div>
     );
