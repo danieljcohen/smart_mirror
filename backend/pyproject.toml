@@ -15,6 +15,7 @@ dependencies = [
     "setuptools>=69,<81",
     "supabase>=2.0,<2.10",
     "google-genai>=1.0",
+    "openai>=1.0",
     "requests>=2.28",
     "vosk>=0.3.45; sys_platform == 'linux'",
     "sounddevice>=0.4; sys_platform == 'linux'",

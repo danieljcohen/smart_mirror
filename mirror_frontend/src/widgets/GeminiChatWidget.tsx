@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { registerWidget } from "./registry";
+import { useRecognitionContext } from "../hooks/useRecognition";
 
 interface ChatMessage {
   role: "user" | "model";
@@ -267,6 +268,7 @@ function useBrowserSpeech(
 
 function GeminiChat({ config }: { config?: Record<string, string> }) {
   const mode = config?.mode ?? "chat";
+  const names = useRecognitionContext();
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
@@ -309,7 +311,10 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
       const res = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: trimImagesForPayload(next) }),
+        body: JSON.stringify({
+          messages: trimImagesForPayload(next),
+          person_name: names[0] ?? "",
+        }),
       });
       const data = await res.json();
       const reply = data.error ? `Error: ${data.error}` : (data.response || "No response.");
@@ -349,7 +354,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
         setPhase("waiting");
       }
     }
-  }, []);
+  }, [names]);
 
   const handleUtterance = useCallback(async (raw: string) => {
     const lower = raw.toLowerCase().trim();

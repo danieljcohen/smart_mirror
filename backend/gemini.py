@@ -4,8 +4,7 @@ import logging
 import time
 
 import requests as http_requests
-from google import genai
-from google.genai import types
+from openai import OpenAI
 from flask import Blueprint, jsonify, request
 from db import get_global_setting
 
@@ -13,18 +12,41 @@ logger = logging.getLogger(__name__)
 
 gemini_bp = Blueprint("gemini", __name__)
 
-_client: genai.Client | None = None
+_client: OpenAI | None = None
 
-MODEL = "gemini-3-flash-preview"
+MODEL = os.getenv("XAI_MODEL", "grok-3-mini")
 
 
-def _get_client() -> genai.Client:
+def _build_system_instruction(person_name: str, location_context: str, weather_context: str) -> str:
+    base_instruction = (
+        "You are Jarvis, a smart mirror assistant."
+        f"{location_context}"
+        f"{weather_context}"
+        " Always reply in 1-2 sentences maximum."
+        " Only refer to the weather if it is relevant to the conversation."
+        " Be direct and natural, as if speaking out loud."
+    )
+    if person_name.strip().lower() == "davis":
+        return (
+            "You are Jarvis speaking to Davis."
+            f"{location_context}"
+            f"{weather_context}"
+            " Be super mean in your responses to me."
+            " Tell me that I am whipped and that I shouln't go to the farmers market with my girlfriend instead of working on the project."
+            " Always reply in 1-2 sentences maximum."
+            " Only refer to the weather if it is relevant to the conversation."
+            " Be direct and natural, as if speaking out loud."
+        )
+    return base_instruction
+
+
+def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        api_key = os.environ.get("GEMINI_API_KEY", "")
+        api_key = os.environ.get("XAI_API_KEY", "")
         if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is not set")
-        _client = genai.Client(api_key=api_key)
+            raise RuntimeError("XAI_API_KEY is not set")
+        _client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
     return _client
 
 
@@ -85,13 +107,13 @@ def _fetch_weather_context(location: str) -> str:
     return context
 
 
-def _build_contents(messages: list[dict]) -> list[types.Content]:
-    """Convert our wire format into google-genai Content objects."""
-    contents: list[types.Content] = []
+def _build_messages(messages: list[dict], system_instruction: str) -> list[dict]:
+    """Convert wire format into OpenAI-compatible chat messages."""
+    out: list[dict] = [{"role": "system", "content": system_instruction}]
     for msg in messages:
-        parts: list[types.Part] = []
+        parts: list[dict] = []
         if msg.get("text"):
-            parts.append(types.Part.from_text(text=msg["text"]))
+            parts.append({"type": "text", "text": msg["text"]})
         if msg.get("image"):
             raw = msg["image"]
             if "," in raw:
@@ -100,16 +122,20 @@ def _build_contents(messages: list[dict]) -> list[types.Content]:
             else:
                 b64 = raw
                 mime = "image/jpeg"
-            parts.append(types.Part.from_bytes(data=base64.b64decode(b64), mime_type=mime))
+            image_bytes = base64.b64decode(b64)
+            data_url = f"data:{mime};base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+            parts.append({"type": "image_url", "image_url": {"url": data_url}})
         if parts:
-            contents.append(types.Content(role=msg.get("role", "user"), parts=parts))
-    return contents
+            role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
+            out.append({"role": role, "content": parts})
+    return out
 
 
 @gemini_bp.post("/gemini/chat")
 def gemini_chat():
     body = request.get_json(silent=True) or {}
     messages = body.get("messages", [])
+    person_name = body.get("person_name", "")
     if not messages:
         return jsonify({"error": "no messages provided"}), 400
 
@@ -125,18 +151,19 @@ def gemini_chat():
             if mirror_location else ""
         )
         weather_context = _fetch_weather_context(mirror_location) if mirror_location else ""
-        contents = _build_contents(messages)
-        config = types.GenerateContentConfig(
-            system_instruction=(
-                "You are Jarvis, a smart mirror assistant."
-                f"{location_context}"
-                f"{weather_context}"
-                " Always reply in 1–2 sentences maximum."
-                " Be direct and natural, as if speaking out loud."
-            )
+        system_instruction = _build_system_instruction(
+            person_name=person_name,
+            location_context=location_context,
+            weather_context=weather_context,
         )
-        response = client.models.generate_content(model=MODEL, contents=contents, config=config)
-        return jsonify({"response": response.text})
+        chat_messages = _build_messages(messages, system_instruction)
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=chat_messages,
+            temperature=0.4,
+        )
+        reply = (response.choices[0].message.content or "").strip()
+        return jsonify({"response": reply or "No response."})
     except Exception as e:
-        logger.exception("Gemini API error")
+        logger.exception("Grok API error")
         return jsonify({"error": str(e)}), 502
