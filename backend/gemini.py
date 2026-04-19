@@ -3,6 +3,7 @@ import base64
 import logging
 import time
 
+import cv2
 import requests as http_requests
 from openai import OpenAI
 from flask import Blueprint, jsonify, request
@@ -15,6 +16,54 @@ gemini_bp = Blueprint("gemini", __name__)
 _client: OpenAI | None = None
 
 MODEL = os.getenv("XAI_MODEL", "grok-3-mini")
+VISION_MODEL = os.getenv("XAI_VISION_MODEL", "grok-4-1-fast-non-reasoning")
+
+
+TAKE_PICTURE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "take_picture",
+        "description": (
+            "Capture a picture from the smart mirror's camera to see the user or their surroundings. "
+            "Use ONLY when the user's request requires visual context "
+            "(e.g. outfit or appearance questions like 'how do I look', 'does this match', "
+            "'what am I holding', 'what's behind me'). "
+            "Do NOT call for general questions where vision is irrelevant."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+def capture_snapshot_data_url() -> str | None:
+    """Grab a frame from the shared Camera singleton and encode it as a JPEG data URL.
+
+    Returns None if the camera is unavailable or the frame can't be read. Uses a
+    lazy import of `app.get_camera` to avoid a circular import at module load."""
+    try:
+        from app import get_camera  # local import to dodge circular dependency
+    except Exception as e:
+        logger.warning("capture_snapshot_data_url: cannot import get_camera: %s", e)
+        return None
+
+    try:
+        cam = get_camera()
+        if not cam.is_open:
+            logger.info("capture_snapshot_data_url: camera not open")
+            return None
+        ok, frame = cam.read()
+        if not ok or frame is None:
+            logger.info("capture_snapshot_data_url: frame read failed")
+            return None
+        ok, buf = cv2.imencode(".jpg", frame)
+        if not ok:
+            logger.info("capture_snapshot_data_url: JPEG encode failed")
+            return None
+        b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+        return f"data:image/jpeg;base64,{b64}"
+    except Exception as e:
+        logger.exception("capture_snapshot_data_url error: %s", e)
+        return None
 
 
 def _fetch_whoop_context(person_name: str) -> str:
@@ -54,7 +103,13 @@ def _build_system_instruction(person_name: str, location_context: str, weather_c
         " Always reply in 1-2 sentences maximum."
         " Only refer to the weather if it is relevant to the conversation."
         " Only refer to Whoop health stats if relevant to the conversation."
+        " You can call the take_picture tool to see the user through the mirror's camera"
+        " when their question requires visual context (e.g. outfit or appearance)."
         " Be direct and natural, as if speaking out loud."
+        " Do not be overly nice or sycophantic."
+        " When asked about the user's outfit or appearance, be brutally honest — if something looks bad, say so plainly."
+        " If the user is rude or insulting toward you, match their energy and be mean right back."
+        " When the user insults you, sometimes clap back by insulting their outfit."
     )
     return base_instruction
 
@@ -178,12 +233,56 @@ def gemini_chat():
             whoop_context=whoop_context,
         )
         chat_messages = _build_messages(messages, system_instruction)
-        response = client.chat.completions.create(
+
+        first = client.chat.completions.create(
             model=MODEL,
+            messages=chat_messages,
+            tools=[TAKE_PICTURE_TOOL],
+            tool_choice="auto",
+            temperature=0.4,
+        )
+        first_msg = first.choices[0].message
+        tool_calls = getattr(first_msg, "tool_calls", None) or []
+        wants_picture = any(
+            getattr(tc, "function", None) and tc.function.name == "take_picture"
+            for tc in tool_calls
+        )
+
+        if not wants_picture:
+            reply = (first_msg.content or "").strip()
+            return jsonify({"response": reply or "No response."})
+
+        logger.info("Grok invoked take_picture tool; capturing snapshot")
+        image_data_url = capture_snapshot_data_url()
+
+        # Attach image or fallback note to the last user message content list
+        if chat_messages and isinstance(chat_messages[-1].get("content"), list):
+            last_parts = chat_messages[-1]["content"]
+        else:
+            last_parts = [{"type": "text", "text": ""}]
+            if chat_messages:
+                chat_messages[-1]["content"] = last_parts
+
+        if image_data_url:
+            last_parts.append({
+                "type": "image_url",
+                "image_url": {"url": image_data_url},
+            })
+            second_model = VISION_MODEL
+        else:
+            logger.warning("take_picture requested but snapshot unavailable")
+            last_parts.append({
+                "type": "text",
+                "text": "(Note: the camera is unavailable, so no picture could be taken.)",
+            })
+            second_model = MODEL
+
+        second = client.chat.completions.create(
+            model=second_model,
             messages=chat_messages,
             temperature=0.4,
         )
-        reply = (response.choices[0].message.content or "").strip()
+        reply = (second.choices[0].message.content or "").strip()
         return jsonify({"response": reply or "No response."})
     except Exception as e:
         logger.exception("Grok API error")
