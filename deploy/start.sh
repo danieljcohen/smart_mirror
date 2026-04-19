@@ -18,4 +18,13 @@ fi
 
 until curl -sf http://localhost:5173 >/dev/null; do sleep 1; done
 
-exec chromium-browser --kiosk --noerrdialogs --disable-infobars http://localhost:5173
+CHROMIUM=$(command -v chromium || command -v chromium-browser)
+exec "$CHROMIUM" \
+  --kiosk \
+  --noerrdialogs \
+  --disable-infobars \
+  --no-first-run \
+  --password-store=basic \
+  --disable-session-crashed-bubble \
+  --disable-features=TranslateUI \
+  http://localhost:5173
