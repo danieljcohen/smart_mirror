@@ -68,6 +68,30 @@ If you have set up on this, log in, or else register.
 
 Face registration now runs as a Modal serverless function (`modal_register/register_service.py`) instead of the Pi backend — the Pi doesn't have the CPU to encode faces quickly. Deploy it with `modal deploy modal_register/register_service.py` and set `VITE_MODAL_REGISTER_URL` in `configure_frontend/.env` to the deployed endpoint URL.
 
+## Autostart on the Raspberry Pi
+
+A systemd unit in `deploy/` launches the mirror on boot: pulls latest code, builds the frontend if anything changed, starts the backend and `vite preview`, and opens Chromium in kiosk mode.
+
+One-time setup on the Pi:
+
+```bash
+cd ~/Desktop/smart_mirror
+git pull
+sudo cp deploy/smart-mirror.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now smart-mirror.service
+```
+
+The unit assumes the user is `davis` and the repo is at `~/Desktop/smart_mirror` — edit `deploy/smart-mirror.service` if either differs.
+
+Useful commands:
+
+```bash
+sudo systemctl restart smart-mirror   # pick up new commits without rebooting
+sudo systemctl stop smart-mirror      # kill it
+sudo journalctl -u smart-mirror -f    # live logs
+```
+
 ## Authors
 
 - **Davis Featherstone** 
