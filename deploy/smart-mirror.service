@@ -1,0 +1,19 @@
+[Unit]
+Description=Smart Mirror
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=davis
+Environment=HOME=/home/davis
+Environment=PATH=/home/davis/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/davis/.Xauthority
+WorkingDirectory=/home/davis/Desktop/smart_mirror
+ExecStart=/home/davis/Desktop/smart_mirror/deploy/start.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical.target
