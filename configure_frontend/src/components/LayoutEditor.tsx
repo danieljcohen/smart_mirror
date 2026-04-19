@@ -409,9 +409,34 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
                               onChange={val => updateWidgetConfig(w.id, field.key, val)}
                               placeholder={field.placeholder}
                             />
+                          ) : field.type === "connect" ? (
+                            <button
+                              onClick={async () => {
+                                const cfg = configPanelItem.config ?? {};
+                                if (field.credentialsEndpoint) {
+                                  await fetch(field.credentialsEndpoint, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ user: userName, ...cfg }),
+                                  });
+                                }
+                                if (field.authorizeEndpoint) {
+                                  // Pass the current Vercel URL as the OAuth redirect_uri so
+                                  // Whoop sends the callback here (publicly accessible) rather
+                                  // than to the Pi's local backend.
+                                  const redirectUri = window.location.origin + "/";
+                                  // Whoop requires state ≥ 8 chars; embed userName with a random suffix
+                                  const state = `${userName}::${Math.random().toString(36).slice(2).padEnd(8, "0")}`;
+                                  window.location.href = `${field.authorizeEndpoint}?user=${encodeURIComponent(userName)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
+                                }
+                              }}
+                              className="w-full rounded-lg border border-zinc-600 bg-zinc-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-600 active:bg-zinc-500"
+                            >
+                              {field.label}
+                            </button>
                           ) : (
                             <input
-                              type="text"
+                              type={field.password ? "password" : "text"}
                               value={configPanelItem.config?.[field.key] ?? ""}
                               onChange={e => updateWidgetConfig(w.id, field.key, e.target.value)}
                               placeholder={field.placeholder}

@@ -3,9 +3,14 @@ import type { ComponentType } from "react";
 export interface ConfigField {
   key: string;
   label: string;
-  type: "text" | "select" | "address";
+  type: "text" | "select" | "address" | "connect";
   placeholder?: string;
+  password?: boolean;
   options?: { value: string; label: string }[];
+  /** For type="connect": POST endpoint to store credentials before OAuth */
+  credentialsEndpoint?: string;
+  /** For type="connect": GET endpoint that starts the OAuth redirect */
+  authorizeEndpoint?: string;
 }
 
 export interface WidgetDefinition {
