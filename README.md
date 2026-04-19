@@ -64,9 +64,9 @@ yarn dev
 
 ### Registering a New Person or Logging in
 
-If you have set up on this, log in, or else register. 
+If you have set up on this, log in, or else register.
 
-- When registering, set Raspberry Pi URL to [http://localhost:3000](http://localhost:3000) when registering locally
+Face registration now runs as a Modal serverless function (`modal_register/register_service.py`) instead of the Pi backend — the Pi doesn't have the CPU to encode faces quickly. Deploy it with `modal deploy modal_register/register_service.py` and set `VITE_MODAL_REGISTER_URL` in `configure_frontend/.env` to the deployed endpoint URL.
 
 ## Authors
 

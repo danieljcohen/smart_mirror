@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-const PI_URL_KEY = "mirror:pi-url";
-
 interface RegisterFaceProps {
   defaultName: string;
   onBack: () => void;
@@ -10,7 +8,6 @@ interface RegisterFaceProps {
 }
 
 export function RegisterFace({ defaultName, onBack, onSuccess }: RegisterFaceProps) {
-  const [piUrl, setPiUrl] = useState(() => localStorage.getItem(PI_URL_KEY) ?? "");
   const [name, setName] = useState(defaultName);
   const [captures, setCaptures] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -68,23 +65,23 @@ export function RegisterFace({ defaultName, onBack, onSuccess }: RegisterFacePro
   const isDone = captures.length >= ANGLES.length;
 
   const handleSubmit = async () => {
-    const url = piUrl.trim().replace(/\/$/, "");
-    if (!url) { setResult({ ok: false, message: "Enter the Pi URL first." }); return; }
+    const registerUrl = import.meta.env.VITE_MODAL_REGISTER_URL?.trim().replace(/\/$/, "");
+    if (!registerUrl) { setResult({ ok: false, message: "VITE_MODAL_REGISTER_URL not configured." }); return; }
     if (!name.trim()) { setResult({ ok: false, message: "Enter a name." }); return; }
     if (captures.length === 0) { setResult({ ok: false, message: "Capture photos first." }); return; }
 
-    localStorage.setItem(PI_URL_KEY, piUrl.trim());
     setSubmitting(true);
     setResult(null);
 
     try {
-      const res = await fetch(`${url}/auth/register`, {
+      const res = await fetch(registerUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), images: captures }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error ?? `Pi responded with ${res.status}`);
+      if (!res.ok) throw new Error(body.detail ?? body.error ?? `Register service responded with ${res.status}`);
+
       setResult({
         ok: true,
         message: `"${name.trim()}" registered — ${body.encodings_saved} encoding(s) saved to Supabase.`,
@@ -117,19 +114,6 @@ export function RegisterFace({ defaultName, onBack, onSuccess }: RegisterFacePro
       </header>
 
       <div className="mx-auto max-w-2xl px-6 py-8 space-y-6">
-        {/* Pi URL */}
-        <div className="space-y-2">
-          <label className="block text-sm text-zinc-400">Raspberry Pi URL</label>
-          <input
-            type="url"
-            value={piUrl}
-            onChange={e => setPiUrl(e.target.value)}
-            placeholder="http://raspberrypi.local:3000"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-white placeholder-zinc-600 outline-none focus:border-blue-500"
-          />
-          <p className="text-xs text-zinc-600">Pi must be running and on the same network.</p>
-        </div>
-
         {/* Name */}
         <div className="space-y-2">
           <label className="block text-sm text-zinc-400">Name</label>
@@ -236,7 +220,7 @@ export function RegisterFace({ defaultName, onBack, onSuccess }: RegisterFacePro
         {/* Submit */}
         <button
           onClick={handleSubmit}
-          disabled={captures.length === 0 || submitting || !name.trim() || !piUrl.trim()}
+          disabled={captures.length === 0 || submitting || !name.trim()}
           className="w-full rounded-xl bg-blue-600 py-3 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-40"
         >
           {submitting ? "Registering…" : "Register Face on Mirror"}

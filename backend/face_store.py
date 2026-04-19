@@ -1,10 +1,4 @@
-"""
-Shared in-memory face encoding store.
-
-Both app.py and auth.py import from here so there is a single source of
-truth for KNOWN_ENCODINGS / KNOWN_NAMES regardless of how app.py was
-originally loaded (__main__ vs imported as 'app').
-"""
+"""Shared in-memory face encoding store."""
 import logging
 import threading
 
