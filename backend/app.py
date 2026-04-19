@@ -19,6 +19,7 @@ import requests as http_requests
 from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT, get_global_setting
 from auth import auth_bp
 from gemini import gemini_bp
+from whoop import whoop_bp
 import face_store
 import gesture_service
 import speech_service
@@ -29,6 +30,7 @@ app = Flask(__name__)
 CORS(app)
 app.register_blueprint(auth_bp)
 app.register_blueprint(gemini_bp)
+app.register_blueprint(whoop_bp)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -357,6 +359,7 @@ AVAILABLE_WIDGETS = [
     {"id": "weather", "name": "Weather", "description": "Local weather conditions", "defaultLayout": {"w": 4, "h": 2, "minW": 3, "minH": 2}},
     {"id": "greeting", "name": "Greeting", "description": "Personalized greeting message", "defaultLayout": {"w": 6, "h": 2, "minW": 3, "minH": 2}},
     {"id": "gemini-chat", "name": "Gemini Chat", "description": "AI chat with image support powered by Google Gemini", "defaultLayout": {"w": 4, "h": 4, "minW": 3, "minH": 3}},
+    {"id": "whoop", "name": "Whoop", "description": "Personal health stats from your Whoop band (recovery, HRV, sleep, strain)", "defaultLayout": {"w": 4, "h": 3, "minW": 3, "minH": 2}},
 ]
 
 

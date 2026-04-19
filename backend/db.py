@@ -103,3 +103,51 @@ def set_global_setting(key: str, value: str) -> None:
     """Upsert a key/value pair in the global settings table."""
     sb = get_supabase()
     sb.table("settings").upsert({"key": key, "value": value}, on_conflict="key").execute()
+
+
+
+def get_whoop_credentials(user_id: int) -> dict | None:
+    sb = get_supabase()
+    result = (
+        sb.table("whoop_credentials")
+        .select("client_id, client_secret, access_token, refresh_token, expires_at")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+def save_whoop_credentials(user_id: int, client_id: str, client_secret: str) -> None:
+    """Store (or update) a user's Whoop app credentials, preserving any existing tokens."""
+    sb = get_supabase()
+    existing = get_whoop_credentials(user_id)
+    row: dict = {"user_id": user_id, "client_id": client_id, "client_secret": client_secret}
+    if existing:
+        row["access_token"] = existing.get("access_token")
+        row["refresh_token"] = existing.get("refresh_token")
+        row["expires_at"] = existing.get("expires_at")
+    sb.table("whoop_credentials").upsert(row, on_conflict="user_id").execute()
+
+
+def update_whoop_tokens(user_id: int, access_token: str, refresh_token: str, expires_at: float) -> None:
+    sb = get_supabase()
+    sb.table("whoop_credentials").update(
+        {"access_token": access_token, "refresh_token": refresh_token, "expires_at": expires_at}
+    ).eq("user_id", user_id).execute()
+
+
+def delete_whoop_credentials(user_id: int) -> None:
+    sb = get_supabase()
+    sb.table("whoop_credentials").delete().eq("user_id", user_id).execute()
+
+
+def get_all_whoop_users() -> list[dict]:
+    """Return [{name, ...credentials}] for every user that has Whoop credentials."""
+    sb = get_supabase()
+    creds = sb.table("whoop_credentials").select("user_id, client_id, access_token, refresh_token, expires_at").execute()
+    if not creds.data:
+        return []
+    user_ids = [r["user_id"] for r in creds.data]
+    users = sb.table("users").select("id, name").in_("id", user_ids).execute()
+    name_map = {u["id"]: u["name"] for u in users.data}
+    return [{"name": name_map[r["user_id"]], **r} for r in creds.data if r["user_id"] in name_map]

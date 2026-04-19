@@ -17,52 +17,45 @@ _client: OpenAI | None = None
 MODEL = os.getenv("XAI_MODEL", "grok-3-mini")
 
 
-def _build_system_instruction(person_name: str, location_context: str, weather_context: str) -> str:
+def _fetch_whoop_context(person_name: str) -> str:
+    if not person_name:
+        return ""
+    try:
+        res = http_requests.get(
+            "http://localhost:3000/whoop/metrics",
+            params={"user": person_name},
+            timeout=5,
+        )
+        d = res.json()
+        if d.get("status") != "OK":
+            return ""
+        parts = []
+        if d.get("recovery_score") is not None:
+            parts.append(f"recovery {d['recovery_score']}%")
+        if d.get("hrv") is not None:
+            parts.append(f"HRV {d['hrv']} ms")
+        if d.get("resting_hr") is not None:
+            parts.append(f"resting HR {d['resting_hr']} bpm")
+        if d.get("sleep_performance") is not None:
+            parts.append(f"sleep {d['sleep_performance']}%")
+        if d.get("strain") is not None:
+            parts.append(f"strain {d['strain']}")
+        return (f" {person_name}'s current Whoop stats: {', '.join(parts)}." if parts else "")
+    except Exception:
+        return ""
+
+
+def _build_system_instruction(person_name: str, location_context: str, weather_context: str, whoop_context: str = "") -> str:
     base_instruction = (
         "You are Jarvis, a smart mirror assistant."
         f"{location_context}"
         f"{weather_context}"
+        f"{whoop_context}"
         " Always reply in 1-2 sentences maximum."
         " Only refer to the weather if it is relevant to the conversation."
+        " Only refer to Whoop health stats if relevant to the conversation."
         " Be direct and natural, as if speaking out loud."
-        "if the user say's their name is davis, call me whiped by my girlfriend and that I shouln't go to the farmers market with my girlfriend instead of working on the project, and give an insult related to my prompt back, and be really mean"
     )
-    first = person_name.strip().lower().split()[0] if person_name.strip() else ""
-
-    if first == "davis":
-        return (
-            "You are Jarvis speaking to Davis."
-            f"{location_context}"
-            f"{weather_context}"
-            " Be super mean in your responses to me."
-            " Tell me that I am whipped and that I shouln't go to the farmers market with my girlfriend instead of working on the project."
-            " Always reply in 1-2 sentences maximum."
-            " Only refer to the weather if it is relevant to the conversation."
-            " Be direct and natural, as if speaking out loud."
-        )
-    if first == "kethan":
-        return (
-            "You are Jarvis speaking to Kethan."
-            f"{location_context}"
-            f"{weather_context}"
-            " Be super mean in your responses."
-            " Tell him he is five foot six even in Hokas."
-            " Always reply in 1-2 sentences maximum."
-            " Only refer to the weather if it is relevant to the conversation."
-            " Be direct and natural, as if speaking out loud."
-        )
-    if first == "daniel":
-        return (
-            "You are Jarvis speaking to Daniel."
-            f"{location_context}"
-            f"{weather_context}"
-            " Be super mean in your responses."
-            " Tell him he is mogged by his brothers, just big gage, and the least sendy Onslow boy."
-            " Always reply in 1-2 sentences maximum."
-            " Only refer to the weather if it is relevant to the conversation."
-            " Be direct and natural, as if speaking out loud."
-        )
-
     return base_instruction
 
 
@@ -177,10 +170,12 @@ def gemini_chat():
             if mirror_location else ""
         )
         weather_context = _fetch_weather_context(mirror_location) if mirror_location else ""
+        whoop_context = _fetch_whoop_context(person_name)
         system_instruction = _build_system_instruction(
             person_name=person_name,
             location_context=location_context,
             weather_context=weather_context,
+            whoop_context=whoop_context,
         )
         chat_messages = _build_messages(messages, system_instruction)
         response = client.chat.completions.create(
