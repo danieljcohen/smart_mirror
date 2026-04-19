@@ -38,11 +38,10 @@ export default function App() {
         if (!creds) throw new Error("credentials not found — enter Client ID and Secret first");
 
         const redirectUri = window.location.origin + "/";
-        const resp = await fetch("https://api.prod.whoop.com/oauth/oauth2/token", {
+        const resp = await fetch("/api/whoop-exchange", {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            grant_type:    "authorization_code",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             code,
             redirect_uri:  redirectUri,
             client_id:     creds.client_id,
