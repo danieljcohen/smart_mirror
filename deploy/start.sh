@@ -5,7 +5,7 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_DIR"
 
 OLD=$(git rev-parse HEAD)
-git pull --ff-only
+git pull --ff-only || echo "git pull failed, continuing with local code"
 NEW=$(git rev-parse HEAD)
 
 if [ "$OLD" != "$NEW" ] || [ ! -d mirror_frontend/dist ]; then
