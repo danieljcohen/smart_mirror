@@ -3,6 +3,8 @@ import { useUser } from "./hooks/useUser";
 import { NameEntry } from "./components/NameEntry";
 import { LayoutEditor } from "./components/LayoutEditor";
 import { RegisterFace } from "./components/RegisterFace";
+import { getUser } from "./db/layout";
+import { getWhoopCredentials, saveWhoopTokens } from "./db/whoop";
 import "./widgets";
 
 type View = "login" | "editor" | "register";
@@ -27,25 +29,40 @@ export default function App() {
     // Clean the URL immediately so refreshing doesn't re-trigger
     window.history.replaceState({}, "", window.location.pathname);
 
-    const redirectUri = window.location.origin + "/";
-    fetch("/api/whoop/exchange", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user: userName, code, redirect_uri: redirectUri }),
-    })
-      .then(r => r.json())
-      .then(data => {
-        setWhoopMsg(
-          data.status === "OK"
-            ? { ok: true,  text: "Whoop connected successfully!" }
-            : { ok: false, text: `Whoop connection failed: ${data.error ?? "unknown error"}` },
-        );
-        setTimeout(() => setWhoopMsg(null), 5000);
-      })
-      .catch(() => {
-        setWhoopMsg({ ok: false, text: "Whoop connection failed: could not reach the mirror." });
-        setTimeout(() => setWhoopMsg(null), 5000);
-      });
+    (async () => {
+      try {
+        const uid = await getUser(userName);
+        if (!uid) throw new Error("user not found");
+
+        const creds = await getWhoopCredentials(uid);
+        if (!creds) throw new Error("credentials not found — enter Client ID and Secret first");
+
+        const redirectUri = window.location.origin + "/";
+        const resp = await fetch("https://api.prod.whoop.com/oauth/oauth2/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type:    "authorization_code",
+            code,
+            redirect_uri:  redirectUri,
+            client_id:     creds.client_id,
+            client_secret: creds.client_secret,
+          }),
+        });
+        if (!resp.ok) {
+          const err = await resp.text();
+          throw new Error(err);
+        }
+        const td = await resp.json();
+        const expiresAt = Date.now() / 1000 + (td.expires_in ?? 3600);
+        await saveWhoopTokens(uid, td.access_token, td.refresh_token ?? "", expiresAt);
+
+        setWhoopMsg({ ok: true, text: "Whoop connected successfully!" });
+      } catch (e) {
+        setWhoopMsg({ ok: false, text: `Whoop connection failed: ${e instanceof Error ? e.message : "unknown error"}` });
+      }
+      setTimeout(() => setWhoopMsg(null), 5000);
+    })();
   }, []);
 
   const handleLogin = (userName: string) => {

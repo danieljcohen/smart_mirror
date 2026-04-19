@@ -3,7 +3,11 @@ import { getAllWidgets, getWidget } from "../widgets";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { type LayoutItem, getUser, loadLayout, saveLayout, loadDefaultLayout, saveDefaultLayout } from "../db/layout";
 import { getMirrorLocation, setMirrorLocation } from "../db/settings";
+import { saveWhoopCredentials } from "../db/whoop";
 import { AddressInput } from "./AddressInput";
+
+const WHOOP_AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth";
+const WHOOP_SCOPES   = "read:recovery read:sleep read:cycles read:profile offline";
 
 type LayoutMode = "user" | "default";
 
@@ -412,23 +416,26 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
                           ) : field.type === "connect" ? (
                             <button
                               onClick={async () => {
-                                const cfg = configPanelItem.config ?? {};
-                                if (field.credentialsEndpoint) {
-                                  await fetch(field.credentialsEndpoint, {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ user: userName, ...cfg }),
-                                  });
+                                const cfg        = configPanelItem.config ?? {};
+                                const clientId     = (cfg.client_id     ?? "").trim();
+                                const clientSecret = (cfg.client_secret ?? "").trim();
+                                if (!clientId || !clientSecret) {
+                                  alert("Enter your Whoop Client ID and Client Secret first.");
+                                  return;
                                 }
-                                if (field.authorizeEndpoint) {
-                                  // Pass the current Vercel URL as the OAuth redirect_uri so
-                                  // Whoop sends the callback here (publicly accessible) rather
-                                  // than to the Pi's local backend.
-                                  const redirectUri = window.location.origin + "/";
-                                  // Whoop requires state ≥ 8 chars; embed userName with a random suffix
-                                  const state = `${userName}::${Math.random().toString(36).slice(2).padEnd(8, "0")}`;
-                                  window.location.href = `${field.authorizeEndpoint}?user=${encodeURIComponent(userName)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
-                                }
+                                const uid = await getUser(userName);
+                                if (!uid) { alert("User not found — register your face first."); return; }
+                                await saveWhoopCredentials(uid, clientId, clientSecret);
+                                const redirectUri = window.location.origin + "/";
+                                const state = `${userName}::${Math.random().toString(36).slice(2).padEnd(8, "0")}`;
+                                const params = new URLSearchParams({
+                                  client_id:     clientId,
+                                  redirect_uri:  redirectUri,
+                                  response_type: "code",
+                                  scope:         WHOOP_SCOPES,
+                                  state,
+                                });
+                                window.location.href = `${WHOOP_AUTH_URL}?${params}`;
                               }}
                               className="w-full rounded-lg border border-zinc-600 bg-zinc-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-600 active:bg-zinc-500"
                             >
