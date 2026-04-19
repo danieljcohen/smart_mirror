@@ -4,6 +4,11 @@ set -e
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_DIR"
 
+for _ in $(seq 1 60); do
+  getent hosts github.com >/dev/null 2>&1 && break
+  sleep 1
+done
+
 OLD=$(git rev-parse HEAD)
 git pull --ff-only || echo "git pull failed, continuing with local code"
 NEW=$(git rev-parse HEAD)
