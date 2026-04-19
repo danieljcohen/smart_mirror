@@ -58,14 +58,6 @@ def get_layout(user_id: int) -> list | None:
     return layout if isinstance(layout, list) else json.loads(layout)
 
 
-def save_layout(user_id: int, layout: list) -> None:
-    sb = get_supabase()
-    sb.table("layouts").upsert(
-        {"user_id": user_id, "layout_json": layout},
-        on_conflict="user_id",
-    ).execute()
-
-
 def get_all_encodings() -> list[dict]:
     """Return all stored face encodings as [{name, encoding}] dicts."""
     sb = get_supabase()
@@ -82,14 +74,6 @@ def get_all_encodings() -> list[dict]:
         for row in enc_result.data
         if row["user_id"] in user_map
     ]
-
-
-def save_encoding(user_id: int, encoding_list: list[float]) -> None:
-    """Persist a single 128-float face encoding to Supabase."""
-    sb = get_supabase()
-    sb.table("face_encodings").insert(
-        {"user_id": user_id, "encoding": encoding_list}
-    ).execute()
 
 
 def get_global_setting(key: str) -> str | None:

@@ -16,8 +16,7 @@ from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 import requests as http_requests
-from db import init_db, get_user_by_name, ensure_user, get_layout, save_layout, DEFAULT_LAYOUT, get_global_setting
-from auth import auth_bp
+from db import init_db, get_user_by_name, get_layout, DEFAULT_LAYOUT, get_global_setting
 from gemini import gemini_bp
 from whoop import whoop_bp
 import face_store
@@ -28,7 +27,6 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
 CORS(app)
-app.register_blueprint(auth_bp)
 app.register_blueprint(gemini_bp)
 app.register_blueprint(whoop_bp)
 logging.basicConfig(level=logging.INFO)
