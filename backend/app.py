@@ -1,10 +1,23 @@
 import os
 import atexit
 import logging
+import sys
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
+
+# When this file is run directly (``uv run app.py``) it is loaded as the
+# ``__main__`` module, but other files (e.g. jarvis.py) do ``from app import
+# get_camera``. Without this alias Python would load app.py a second time as
+# the separate ``app`` module, giving that copy its own uninitialized
+# ``camera`` global — so ``take_picture`` would try to construct a second
+# Picamera2 while the working one in ``__main__`` still owns the device,
+# which libcamera rejects with "Camera in Running state trying acquire()".
+# Aliasing the two module entries makes ``from app import X`` resolve to
+# this same, already-initialized module.
+if __name__ == "__main__" and "app" not in sys.modules:
+    sys.modules["app"] = sys.modules[__name__]
 
 import cv2
 import face_recognition
