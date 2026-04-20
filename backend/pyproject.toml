@@ -20,6 +20,11 @@ dependencies = [
     "openwakeword>=0.6",
     "sounddevice>=0.4",
     "websocket-client>=1.0",
+    # openWakeWord inference backend. tflite-runtime is used on 32-bit ARM
+    # (Raspberry Pi armv7l) via the override below; everywhere else we use
+    # onnxruntime, which has wheels for macOS (arm64/x86_64) and 64-bit Linux
+    # (x86_64/aarch64, i.e. Raspberry Pi OS 64-bit).
+    "onnxruntime>=1.17; platform_machine != 'armv7l'",
 ]
 
 [build-system]
