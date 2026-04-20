@@ -31,32 +31,37 @@ function speak(
 ) {
   stopSpeaking();
 
+  console.log("[jarvis] speak() called, text.length=", text.length);
+
   fetch("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   })
     .then((res) => {
-      if (!res.ok) throw new Error("TTS request failed");
+      console.log("[jarvis] /api/tts status=", res.status);
+      if (!res.ok) throw new Error(`TTS request failed: ${res.status}`);
       return res.blob();
     })
     .then((blob) => {
+      console.log("[jarvis] TTS blob size=", blob.size, "type=", blob.type);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       _ttsAudio = audio;
 
       let finished = false;
-      const done = () => {
+      const done = (reason: string) => {
         if (finished) return;
         finished = true;
         if (iv) clearInterval(iv);
         URL.revokeObjectURL(url);
         _ttsAudio = null;
+        console.log("[jarvis] speak done:", reason);
         onEnd?.();
       };
 
-      audio.onended = done;
-      audio.onerror = () => { console.warn("[jarvis] TTS playback error"); done(); };
+      audio.onended = () => done("ended");
+      audio.onerror = (e) => { console.warn("[jarvis] TTS playback error", e); done("error"); };
 
       let iv: ReturnType<typeof setInterval> | null = null;
       if (onBoundary) {
@@ -66,9 +71,17 @@ function speak(
         }, 200);
       }
 
-      audio.play().catch(() => done());
+      audio.play()
+        .then(() => console.log("[jarvis] audio.play() started"))
+        .catch((err) => {
+          console.warn("[jarvis] audio.play() rejected:", err?.name, err?.message);
+          done("play-rejected");
+        });
     })
-    .catch(() => onEnd?.());
+    .catch((err) => {
+      console.warn("[jarvis] speak() fetch failed:", err);
+      onEnd?.();
+    });
 }
 
 // ── Voice-only animated view ─────────────────────────────────────────────────
@@ -373,11 +386,13 @@ function JarvisChat({ config }: { config?: Record<string, string> }) {
 
   const handleWake = useCallback(() => {
     if (phaseRef.current === "processing") return;
+    // Ignore wake events that fire while Jarvis is speaking. The mic is still
+    // open during TTS, so the speaker output regularly triggers a false wake
+    // which then silences Jarvis's own reply. If the user actually wants to
+    // interrupt, they can repeat the wake phrase after the reply finishes.
     if (phaseRef.current === "speaking") {
-      speakIdRef.current++;
-      stopSpeaking();
-      if (orbBeatTimer.current) clearTimeout(orbBeatTimer.current);
-      setOrbBeat(false);
+      console.log("[jarvis] wake event ignored (currently speaking — likely acoustic feedback)");
+      return;
     }
     setPhase("listening");
     setInterimText("");

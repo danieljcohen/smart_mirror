@@ -1,6 +1,7 @@
 import os
 import base64
 import logging
+import re
 import time
 
 import cv2
@@ -179,6 +180,42 @@ def _fetch_weather_context(location: str) -> str:
     return context
 
 
+# Patterns that cover how Grok variants (notably grok-3-mini) emit a tool
+# invocation as text instead of populating the structured `tool_calls` field.
+# Covers: bare name, call syntax, JSON object, XML-ish <tool_call>/<function>
+# wrappers, and fenced code blocks containing any of the above.
+_TOOL_TEXT_PATTERNS: list[re.Pattern] = [
+    re.compile(r"<\s*tool[_\- ]?call\s*>\s*.*?take_picture.*?<\s*/\s*tool[_\- ]?call\s*>", re.IGNORECASE | re.DOTALL),
+    re.compile(r"<\s*function[^>]*>\s*.*?take_picture.*?<\s*/\s*function\s*>", re.IGNORECASE | re.DOTALL),
+    re.compile(r"<\s*tool[^>]*>\s*.*?take_picture.*?<\s*/\s*tool\s*>", re.IGNORECASE | re.DOTALL),
+    re.compile(r"```(?:json|tool_code|xml)?\s*[^`]*take_picture[^`]*```", re.IGNORECASE | re.DOTALL),
+    re.compile(r'["\']?name["\']?\s*:\s*["\']take_picture["\']', re.IGNORECASE),
+    re.compile(r"\btake_picture\s*\(\s*\)", re.IGNORECASE),
+    re.compile(r"^\s*take_picture\s*$", re.IGNORECASE),
+]
+
+
+def _looks_like_take_picture_call(content: str) -> bool:
+    """Return True if the model expressed take_picture as text content."""
+    if not content:
+        return False
+    return any(p.search(content) for p in _TOOL_TEXT_PATTERNS)
+
+
+def _strip_tool_call_text(content: str) -> str:
+    """Remove any take_picture tool-call shaped text from ``content``.
+
+    Used as a safety net so the user never sees a raw tool invocation even if
+    the second call still echoes one.
+    """
+    if not content:
+        return ""
+    cleaned = content
+    for pat in _TOOL_TEXT_PATTERNS:
+        cleaned = pat.sub("", cleaned)
+    return cleaned.strip()
+
+
 def _build_messages(messages: list[dict], system_instruction: str) -> list[dict]:
     """Convert wire format into OpenAI-compatible chat messages."""
     out: list[dict] = [{"role": "system", "content": system_instruction}]
@@ -229,14 +266,34 @@ def jarvis_chat():
         )
         first_msg = first.choices[0].message
         tool_calls = getattr(first_msg, "tool_calls", None) or []
+        raw_content = (first_msg.content or "").strip()
+
         wants_picture = any(
             getattr(tc, "function", None) and tc.function.name == "take_picture"
             for tc in tool_calls
         )
 
+        # Fallback: grok-3-mini (and occasionally other Grok variants) emit the
+        # tool invocation as text in ``content`` instead of populating the
+        # structured ``tool_calls`` field. Covers "take_picture",
+        # "take_picture()", JSON {"name":"take_picture"}, and <tool_call>…
+        # <function>… wrappers. Without this the raw string would leak into the
+        # chat UI, which is the "picture tool call is finicky" symptom.
+        if not wants_picture and _looks_like_take_picture_call(raw_content):
+            logger.info(
+                "Model emitted take_picture as text content; promoting to tool "
+                "invocation. Raw content: %r",
+                raw_content[:200],
+            )
+            wants_picture = True
+
+        logger.info(
+            "Jarvis turn: tool_calls=%d wants_picture=%s content=%r",
+            len(tool_calls), wants_picture, raw_content[:200],
+        )
+
         if not wants_picture:
-            reply = (first_msg.content or "").strip()
-            return jsonify({"response": reply or "No response."})
+            return jsonify({"response": raw_content or "No response."})
 
         logger.info("Grok invoked take_picture tool; capturing snapshot")
         image_data_url = capture_snapshot_data_url()
@@ -269,6 +326,7 @@ def jarvis_chat():
             temperature=0.4,
         )
         reply = (second.choices[0].message.content or "").strip()
+        reply = _strip_tool_call_text(reply)
         return jsonify({"response": reply or "No response."})
     except Exception as e:
         logger.exception("Grok API error")
