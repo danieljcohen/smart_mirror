@@ -196,9 +196,8 @@ atexit.register(_shutdown_camera)
 def _signal_shutdown(signum, _frame):
     logger.info("Signal %d received — releasing camera and exiting.", signum)
     _shutdown_camera()
-    # Re-raise default behavior so the process actually exits.
-    import sys
-    sys.exit(0)
+    # sys.exit hangs in Py_Finalize on PortAudio/libcamera daemon threads.
+    os._exit(0)
 
 
 # Ensure SIGTERM/SIGINT release the CSI camera; otherwise libcamera keeps the
