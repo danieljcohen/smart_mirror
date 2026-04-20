@@ -633,7 +633,7 @@ def proxy_youtube_shorts():
         "part": "snippet",
         "type": "video",
         "videoDuration": "short",
-        "maxResults": 15,
+        "maxResults": 50,
         "key": YOUTUBE_API_KEY,
     }
 
