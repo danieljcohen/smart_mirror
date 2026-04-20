@@ -19,15 +19,17 @@ import time
 
 logger = logging.getLogger(__name__)
 
+_DEPS_ERROR: str | None = None
 try:
     import numpy as np
     import openwakeword
     from openwakeword.model import Model as OWWModel
-    import sounddevice as sd
+    import sounddevice as sd  # raises OSError on Linux/Pi if libportaudio2 is missing
     import websocket as ws_client
     _HAS_DEPS = True
-except ImportError:
+except (ImportError, OSError) as _e:
     _HAS_DEPS = False
+    _DEPS_ERROR = f"{type(_e).__name__}: {_e}"
 
 SAMPLE_RATE = 16_000
 FRAME_MS = 80
@@ -321,7 +323,10 @@ def _run() -> None:
 def start() -> None:
     """Launch the speech service background thread."""
     if not _HAS_DEPS:
-        logger.info("Speech dependencies unavailable — speech service disabled.")
+        logger.warning(
+            "Speech dependencies unavailable — speech service disabled. Reason: %s",
+            _DEPS_ERROR,
+        )
         return
     t = threading.Thread(target=_run, daemon=True)
     t.start()
