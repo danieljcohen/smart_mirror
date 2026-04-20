@@ -24,7 +24,8 @@ dependencies = [
     # (Raspberry Pi armv7l) via the override below; everywhere else we use
     # onnxruntime, which has wheels for macOS (arm64/x86_64) and 64-bit Linux
     # (x86_64/aarch64, i.e. Raspberry Pi OS 64-bit).
-    "onnxruntime>=1.17; platform_machine != 'armv7l'",
+    # 1.20.0 (Oct 2024) is the first release with Python 3.13 wheels.
+    "onnxruntime>=1.20; platform_machine != 'armv7l'",
 ]
 
 [build-system]
@@ -35,12 +36,10 @@ build-backend = "hatchling.build"
 only-include = ["app.py", "db.py", "face_store.py"]
 
 [tool.uv]
-# tflite-runtime only has Linux wheels and only for Python <3.12;
-# our code falls back to onnxruntime on all other platforms.
-override-dependencies = [
-    "tflite-runtime>=2.14; python_version < '3.12' and sys_platform == 'linux'",
-    "onnxruntime<1.24; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-]
+# NOTE: do NOT add onnxruntime here — uv's override-dependencies replaces the
+# marker for a package across the whole resolution graph, which silently
+# prevents it from installing on platforms we actually want (e.g. linux/aarch64).
+# onnxruntime is a direct dep above with the correct marker.
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 
 
