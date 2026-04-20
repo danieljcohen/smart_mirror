@@ -57,27 +57,48 @@ class Camera:
         self._picam = None
         self._cap = None
 
+        picam_err: Exception | None = None
         try:
             from picamera2 import Picamera2
-            picam = Picamera2()
-            try:
-                config = picam.create_video_configuration(
-                    main={"size": (640, 480), "format": "RGB888"}
-                )
-                picam.configure(config)
-                picam.start()
-            except Exception:
-                # Partially-initialized Picamera2 holds the libcamera device;
-                # release it before falling back, and swallow the known
-                # "no attribute 'allocator'" AttributeError from close() when
-                # __init__ didn't complete.
+            # Retry a few times: if a prior app instance hasn't finished
+            # releasing the CSI camera, Picamera2() will raise; usually
+            # resolves within ~1–2s.
+            for attempt in range(3):
                 try:
-                    picam.close()
-                except Exception:
-                    pass
-                raise
-            self._picam = picam
-            logger.info("Using picamera2 (Pi Camera)")
+                    picam = Picamera2()
+                    try:
+                        config = picam.create_video_configuration(
+                            main={"size": (640, 480), "format": "RGB888"}
+                        )
+                        picam.configure(config)
+                        picam.start()
+                    except Exception:
+                        # Partially-initialized Picamera2 still holds the
+                        # libcamera device and leaves a zombie entry in
+                        # ``Picamera2.cameras`` that the internal listener
+                        # thread will keep dispatching to (surfacing as
+                        # "'Picamera2' object has no attribute 'allocator'"
+                        # in logs). Close it to drop the registration.
+                        try:
+                            picam.close()
+                        except Exception:
+                            pass
+                        raise
+                    self._picam = picam
+                    logger.info(
+                        "Using picamera2 (Pi Camera)%s",
+                        f" (attempt {attempt + 1})" if attempt else "",
+                    )
+                    break
+                except Exception as e:
+                    picam_err = e
+                    logger.warning(
+                        "Picamera2 init attempt %d/3 failed: %s",
+                        attempt + 1, e,
+                    )
+                    time.sleep(1.0)
+            if self._picam is None:
+                raise picam_err if picam_err else RuntimeError("picamera2 init failed")
         except Exception as e:
             logger.info("picamera2 not available (%s), falling back to OpenCV", e)
             self._picam = None
@@ -159,6 +180,25 @@ def _shutdown_camera() -> None:
 
 
 atexit.register(_shutdown_camera)
+
+
+def _signal_shutdown(signum, _frame):
+    logger.info("Signal %d received — releasing camera and exiting.", signum)
+    _shutdown_camera()
+    # Re-raise default behavior so the process actually exits.
+    import sys
+    sys.exit(0)
+
+
+# Ensure SIGTERM/SIGINT release the CSI camera; otherwise libcamera keeps the
+# device busy until this PID is reaped, breaking the next `uv run app.py`.
+import signal as _signal
+for _sig in (_signal.SIGTERM, _signal.SIGINT, _signal.SIGHUP):
+    try:
+        _signal.signal(_sig, _signal_shutdown)
+    except (ValueError, OSError):
+        # ValueError: not in main thread; OSError: signal not supported.
+        pass
 
 
 # ── Face encoding ──────────────────────────────────────────────────
