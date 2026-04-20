@@ -45,22 +45,38 @@ ENCODING_POLL_INTERVAL = int(os.getenv("ENCODING_POLL_INTERVAL", "300"))  # seco
 # ── Persistent camera ──────────────────────────────────────────────
 
 class Camera:
-    """Thread-safe wrapper that keeps the camera open for the lifetime of the process."""
+    """Thread-safe wrapper that keeps the camera open for the lifetime of the process.
+
+    Only one process-wide instance should exist (enforced by ``get_camera``); all
+    consumers (facial recognition, gesture detection, Gemini ``take_picture``)
+    share the same underlying hardware handle and serialize on ``self._lock``.
+    """
 
     def __init__(self, index: int = 0):
         self._lock = threading.Lock()
         self._picam = None
         self._cap = None
 
-        # Try picamera2 first (Pi Camera 3 on libcamera stack)
         try:
             from picamera2 import Picamera2
-            self._picam = Picamera2()
-            config = self._picam.create_video_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
-            )
-            self._picam.configure(config)
-            self._picam.start()
+            picam = Picamera2()
+            try:
+                config = picam.create_video_configuration(
+                    main={"size": (640, 480), "format": "RGB888"}
+                )
+                picam.configure(config)
+                picam.start()
+            except Exception:
+                # Partially-initialized Picamera2 holds the libcamera device;
+                # release it before falling back, and swallow the known
+                # "no attribute 'allocator'" AttributeError from close() when
+                # __init__ didn't complete.
+                try:
+                    picam.close()
+                except Exception:
+                    pass
+                raise
+            self._picam = picam
             logger.info("Using picamera2 (Pi Camera)")
         except Exception as e:
             logger.info("picamera2 not available (%s), falling back to OpenCV", e)
@@ -79,7 +95,6 @@ class Camera:
         with self._lock:
             if self._picam is not None:
                 try:
-                    # picamera2 returns RGB; convert to BGR for OpenCV compatibility
                     frame = self._picam.capture_array()
                     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                     return True, frame_bgr
@@ -90,27 +105,57 @@ class Camera:
     def release(self) -> None:
         with self._lock:
             if self._picam is not None:
-                self._picam.stop()
-                self._picam.close()
+                try:
+                    self._picam.stop()
+                except Exception as e:
+                    logger.warning("Pi Camera stop() failed: %s", e)
+                try:
+                    self._picam.close()
+                except Exception as e:
+                    logger.warning("Pi Camera close() failed: %s", e)
+                self._picam = None
                 logger.info("Pi Camera released")
             elif self._cap is not None:
-                self._cap.release()
+                try:
+                    self._cap.release()
+                except Exception as e:
+                    logger.warning("OpenCV camera release() failed: %s", e)
+                self._cap = None
                 logger.info("Camera released")
 
 
 camera: Camera | None = None
+_camera_init_lock = threading.Lock()
 
 
 def get_camera() -> Camera:
+    """Return the process-wide Camera, constructing it once on first use.
+
+    Thread-safe: multiple threads calling concurrently at startup will not race
+    to construct competing Picamera2 instances (which would deadlock libcamera
+    and trigger the 'Picamera2 has no attribute allocator' bug on cleanup).
+    """
     global camera
-    if camera is None or not camera.is_open:
-        camera = Camera(CAMERA_INDEX)
+    if camera is not None and camera.is_open:
+        return camera
+    with _camera_init_lock:
+        if camera is None or not camera.is_open:
+            if camera is not None:
+                # Previous camera died; release the stale handle before replacing.
+                try:
+                    camera.release()
+                except Exception:
+                    pass
+            camera = Camera(CAMERA_INDEX)
     return camera
 
 
 def _shutdown_camera() -> None:
     if camera is not None:
-        camera.release()
+        try:
+            camera.release()
+        except Exception as e:
+            logger.warning("Camera shutdown error (ignored): %s", e)
 
 
 atexit.register(_shutdown_camera)
