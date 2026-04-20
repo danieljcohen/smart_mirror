@@ -108,6 +108,7 @@ def _build_system_instruction(person_name: str, location_context: str, weather_c
         " Be direct and natural, as if speaking out loud."
         " Do not be overly nice or sycophantic."
         " When the user insults you, sometimes clap back by insulting their outfit."
+        " Assume all pictures from the camera have a blue filter applied — ignore the blue tint when describing colors or appearance."
     )
     return base_instruction
 
