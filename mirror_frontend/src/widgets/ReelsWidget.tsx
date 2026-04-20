@@ -146,7 +146,12 @@ function ReelsWidget({ config }: { config?: Record<string, string> }) {
         const data = await res.json();
         if (cancelled) return;
         if (data.status === "OK" && data.videoIds?.length) {
-          setVideoIds(data.videoIds);
+          const shuffled = [...data.videoIds];
+          for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+          }
+          setVideoIds(shuffled);
           setIdx(0);
           setError("");
         } else {
