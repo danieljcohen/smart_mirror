@@ -1,11 +1,20 @@
 #!/bin/bash
 set -e
 
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_DIR"
 
+for _ in $(seq 1 60); do
+  getent hosts github.com >/dev/null 2>&1 && break
+  sleep 1
+done
+
 OLD=$(git rev-parse HEAD)
-git pull --ff-only
+git pull --ff-only || echo "git pull failed, continuing with local code"
 NEW=$(git rev-parse HEAD)
 
 if [ "$OLD" != "$NEW" ] || [ ! -d mirror_frontend/dist ]; then
@@ -18,4 +27,13 @@ fi
 
 until curl -sf http://localhost:5173 >/dev/null; do sleep 1; done
 
-exec chromium-browser --kiosk --noerrdialogs --disable-infobars http://localhost:5173
+CHROMIUM=$(command -v chromium || command -v chromium-browser)
+exec "$CHROMIUM" \
+  --kiosk \
+  --noerrdialogs \
+  --disable-infobars \
+  --no-first-run \
+  --password-store=basic \
+  --disable-session-crashed-bubble \
+  --disable-features=TranslateUI \
+  http://localhost:5173

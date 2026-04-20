@@ -70,26 +70,24 @@ Face registration now runs as a Modal serverless function (`modal_register/regis
 
 ## Autostart on the Raspberry Pi
 
-A systemd unit in `deploy/` launches the mirror on boot: pulls latest code, builds the frontend if anything changed, starts the backend and `vite preview`, and opens Chromium in kiosk mode.
+`deploy/start.sh` pulls latest code, builds the frontend if anything changed, starts the backend and `vite preview`, then opens Chromium in kiosk mode.
 
-One-time setup on the Pi:
+On Pi OS Bookworm (labwc / Wayland), wire it into the compositor's autostart so it inherits the full graphical session env. One-time setup on the Pi:
+
+```bash
+cat > ~/.config/labwc/autostart <<'EOF'
+/home/davis/Desktop/smart_mirror/deploy/start.sh &
+EOF
+chmod +x ~/.config/labwc/autostart
+```
+
+Reboot. To exit the kiosk: `Alt+F4`, or from SSH `pkill -f chromium; pkill -f 'yarn preview'; pkill -f 'uv run'`.
+
+To run manually (useful for debugging):
 
 ```bash
 cd ~/Desktop/smart_mirror
-git pull
-sudo cp deploy/smart-mirror.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now smart-mirror.service
-```
-
-The unit assumes the user is `davis` and the repo is at `~/Desktop/smart_mirror` — edit `deploy/smart-mirror.service` if either differs.
-
-Useful commands:
-
-```bash
-sudo systemctl restart smart-mirror   # pick up new commits without rebooting
-sudo systemctl stop smart-mirror      # kill it
-sudo journalctl -u smart-mirror -f    # live logs
+./deploy/start.sh
 ```
 
 ## Authors
