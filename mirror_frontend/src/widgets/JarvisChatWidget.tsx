@@ -5,13 +5,11 @@ import { useRecognitionContext } from "../hooks/useRecognition";
 interface ChatMessage {
   role: "user" | "model";
   text: string;
-  image?: string;
 }
 
 type Phase = "waiting" | "listening" | "processing" | "speaking";
 
 const WAKE_PHRASE = "hey jarvis";
-const CAMERA_PHRASES = ["take a picture"];
 const CLEAR_PHRASES = ["clear chat", "new conversation", "start over", "reset chat"];
 
 const BrowserSpeechRecognition =
@@ -71,29 +69,6 @@ function speak(
       audio.play().catch(() => done());
     })
     .catch(() => onEnd?.());
-}
-
-async function captureSnapshot(): Promise<string | null> {
-  try {
-    const res = await fetch("/api/snapshot");
-    const data = await res.json();
-    return data.image ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function trimImagesForPayload(messages: ChatMessage[]): ChatMessage[] {
-  let lastImageIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].image) { lastImageIdx = i; break; }
-  }
-  return messages.map((m, i) => {
-    if (m.image && i !== lastImageIdx) {
-      return { ...m, image: undefined, text: m.text || "[sent an image]" };
-    }
-    return m;
-  });
 }
 
 // ── Voice-only animated view ─────────────────────────────────────────────────
@@ -291,7 +266,7 @@ function useBrowserSpeech(
 
 // ── Main widget ───────────────────────────────────────────────────────────────
 
-function GeminiChat({ config }: { config?: Record<string, string> }) {
+function JarvisChat({ config }: { config?: Record<string, string> }) {
   const mode = config?.mode ?? "chat";
   const names = useRecognitionContext();
   const modeRef = useRef(mode);
@@ -325,19 +300,19 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
       .catch(() => setUseBackend(false));
   }, []);
 
-  const sendToGemini = useCallback(async (text: string, image?: string | null) => {
-    const userMsg: ChatMessage = { role: "user", text, image: image ?? undefined };
+  const sendToJarvis = useCallback(async (text: string) => {
+    const userMsg: ChatMessage = { role: "user", text };
     const next = [...messagesRef.current, userMsg];
     setMessages(next);
     messagesRef.current = next;
     setPhase("processing");
 
     try {
-      const res = await fetch("/api/gemini/chat", {
+      const res = await fetch("/api/jarvis/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: trimImagesForPayload(next),
+          messages: next,
           person_name: names[0] ?? "",
         }),
       });
@@ -365,7 +340,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
         return;
       }
     } catch {
-      const errMsg = "Sorry, I couldn't reach Gemini.";
+      const errMsg = "Sorry, I couldn't reach Jarvis.";
       setMessages(m => [...m, { role: "model", text: errMsg }]);
       if (modeRef.current === "voice") {
         setSpokenText(errMsg);
@@ -391,15 +366,8 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
       return;
     }
 
-    let image: string | null = null;
-    const text = raw;
-    if (CAMERA_PHRASES.some(p => lower.includes(p))) {
-      image = await captureSnapshot();
-      if (!image) { setPhase("waiting"); return; }
-    }
-
-    await sendToGemini(text, image);
-  }, [sendToGemini]);
+    await sendToJarvis(raw);
+  }, [sendToJarvis]);
 
   // ── Backend speech handlers (openWakeWord + Deepgram) ───────────────────────
 
@@ -546,7 +514,7 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
             <MicIcon className="h-9 w-9 opacity-90" />
             <span className="text-base font-semibold">Say &ldquo;Hey Jarvis&rdquo; to start</span>
             <span className="text-sm font-medium text-white/70">
-              &ldquo;take a picture&rdquo; for camera &middot; &ldquo;clear chat&rdquo; to reset
+              Say &ldquo;clear chat&rdquo; to reset
             </span>
           </div>
         )}
@@ -557,7 +525,6 @@ function GeminiChat({ config }: { config?: Record<string, string> }) {
                 m.role === "user" ? "bg-blue-600/50 text-white" : "bg-white/15 text-white/95"
               }`}
             >
-              {m.image && <img src={m.image} alt="captured" className="mb-1.5 max-h-24 rounded" />}
               {m.text && <p className="whitespace-pre-wrap">{m.text}</p>}
             </div>
           </div>
@@ -623,10 +590,10 @@ function MicIcon({ className }: { className?: string }) {
 
 registerWidget({
   id: "gemini-chat",
-  name: "Gemini Chat",
-  description: "AI chat with image support powered by Google Gemini",
+  name: "Jarvis Chat",
+  description: "AI chat with image support powered by Jarvis",
   defaultLayout: { w: 4, h: 4, minW: 3, minH: 3 },
-  component: GeminiChat,
+  component: JarvisChat,
   configFields: [
     {
       key: "mode",
@@ -640,4 +607,4 @@ registerWidget({
   ],
 });
 
-export default GeminiChat;
+export default JarvisChat;

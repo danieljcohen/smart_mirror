@@ -6,8 +6,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import base64
-
 import cv2
 import face_recognition
 import numpy as np
@@ -17,7 +15,7 @@ from flask_cors import CORS
 
 import requests as http_requests
 from db import init_db, get_user_by_name, get_layout, DEFAULT_LAYOUT, get_global_setting
-from gemini import gemini_bp
+from jarvis import jarvis_bp
 from whoop import whoop_bp
 import face_store
 import gesture_service
@@ -27,7 +25,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = Flask(__name__)
 CORS(app)
-app.register_blueprint(gemini_bp)
+app.register_blueprint(jarvis_bp)
 app.register_blueprint(whoop_bp)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,7 +46,7 @@ class Camera:
     """Thread-safe wrapper that keeps the camera open for the lifetime of the process.
 
     Only one process-wide instance should exist (enforced by ``get_camera``); all
-    consumers (facial recognition, gesture detection, Gemini ``take_picture``)
+    consumers (facial recognition, gesture detection, Jarvis ``take_picture``)
     share the same underlying hardware handle and serialize on ``self._lock``.
     """
 
@@ -417,31 +415,13 @@ def tts():
         return jsonify({"error": str(e)}), 502
 
 
-# ── Snapshot endpoint ────────────────────────────────────────────────
-
-@app.get("/snapshot")
-def snapshot():
-    """Return the current camera frame as a base64 JPEG data URL."""
-    cam = get_camera()
-    if not cam.is_open:
-        return jsonify({"error": "cannot open camera"}), 500
-
-    ok, frame = cam.read()
-    if not ok:
-        return jsonify({"error": "failed to capture frame"}), 500
-
-    _, buf = cv2.imencode(".jpg", frame)
-    b64 = base64.b64encode(buf.tobytes()).decode("ascii")
-    return jsonify({"image": f"data:image/jpeg;base64,{b64}"})
-
-
 # ── Layout endpoints ────────────────────────────────────────────────
 
 AVAILABLE_WIDGETS = [
     {"id": "clock", "name": "Clock", "description": "Current time and date", "defaultLayout": {"w": 4, "h": 2, "minW": 2, "minH": 2}},
     {"id": "weather", "name": "Weather", "description": "Local weather conditions", "defaultLayout": {"w": 4, "h": 2, "minW": 3, "minH": 2}},
     {"id": "greeting", "name": "Greeting", "description": "Personalized greeting message", "defaultLayout": {"w": 6, "h": 2, "minW": 3, "minH": 2}},
-    {"id": "gemini-chat", "name": "Gemini Chat", "description": "AI chat with image support powered by Google Gemini", "defaultLayout": {"w": 4, "h": 4, "minW": 3, "minH": 3}},
+    {"id": "gemini-chat", "name": "Jarvis Chat", "description": "AI chat with image support powered by Jarvis", "defaultLayout": {"w": 4, "h": 4, "minW": 3, "minH": 3}},
     {"id": "whoop", "name": "Whoop", "description": "Personal health stats from your Whoop band (recovery, HRV, sleep, strain)", "defaultLayout": {"w": 4, "h": 3, "minW": 3, "minH": 2}},
 ]
 

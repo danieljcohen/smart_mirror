@@ -1,6 +1,6 @@
 import { registerWidget } from "./registry";
 
-function GeminiChatPreview({ config }: { config?: Record<string, string> }) {
+function JarvisChatPreview({ config }: { config?: Record<string, string> }) {
   const mode = config?.mode ?? "chat";
 
   if (mode === "voice") {
@@ -80,10 +80,10 @@ function GeminiChatPreview({ config }: { config?: Record<string, string> }) {
 
 registerWidget({
   id: "gemini-chat",
-  name: "Gemini Chat",
-  description: "AI chat with image support powered by Google Gemini",
+  name: "Jarvis Chat",
+  description: "AI chat with image support powered by Jarvis",
   defaultLayout: { w: 4, h: 4, minW: 3, minH: 3 },
-  component: GeminiChatPreview,
+  component: JarvisChatPreview,
   configFields: [
     {
       key: "mode",
@@ -97,4 +97,4 @@ registerWidget({
   ],
 });
 
-export default GeminiChatPreview;
+export default JarvisChatPreview;

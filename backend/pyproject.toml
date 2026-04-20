@@ -14,7 +14,6 @@ dependencies = [
     # face_recognition_models imports pkg_resources; setuptools 82+ drops pkg_resources
     "setuptools>=69,<81",
     "supabase>=2.0,<2.10",
-    "google-genai>=1.0",
     "openai>=1.0",
     "requests>=2.28",
     "openwakeword>=0.6",

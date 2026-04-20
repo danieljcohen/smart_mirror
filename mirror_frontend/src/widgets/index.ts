@@ -1,7 +1,7 @@
 import "./ClockWidget";
 import "./WeatherWidget";
 import "./GreetingWidget";
-import "./GeminiChatWidget";
+import "./JarvisChatWidget";
 import "./TransitWidget";
 import "./ReelsWidget";
 import "./HourlyWeatherWidget";

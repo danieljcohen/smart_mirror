@@ -11,7 +11,7 @@ from db import get_global_setting
 
 logger = logging.getLogger(__name__)
 
-gemini_bp = Blueprint("gemini", __name__)
+jarvis_bp = Blueprint("jarvis", __name__)
 
 _client: OpenAI | None = None
 
@@ -185,28 +185,16 @@ def _build_messages(messages: list[dict], system_instruction: str) -> list[dict]
     """Convert wire format into OpenAI-compatible chat messages."""
     out: list[dict] = [{"role": "system", "content": system_instruction}]
     for msg in messages:
-        parts: list[dict] = []
-        if msg.get("text"):
-            parts.append({"type": "text", "text": msg["text"]})
-        if msg.get("image"):
-            raw = msg["image"]
-            if "," in raw:
-                header, b64 = raw.split(",", 1)
-                mime = header.split(";")[0].split(":")[1] if ":" in header else "image/jpeg"
-            else:
-                b64 = raw
-                mime = "image/jpeg"
-            image_bytes = base64.b64decode(b64)
-            data_url = f"data:{mime};base64,{base64.b64encode(image_bytes).decode('utf-8')}"
-            parts.append({"type": "image_url", "image_url": {"url": data_url}})
-        if parts:
-            role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
-            out.append({"role": role, "content": parts})
+        text = msg.get("text")
+        if not text:
+            continue
+        role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
+        out.append({"role": role, "content": [{"type": "text", "text": text}]})
     return out
 
 
-@gemini_bp.post("/gemini/chat")
-def gemini_chat():
+@jarvis_bp.post("/jarvis/chat")
+def jarvis_chat():
     body = request.get_json(silent=True) or {}
     messages = body.get("messages", [])
     person_name = body.get("person_name", "")
