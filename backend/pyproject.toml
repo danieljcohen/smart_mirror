@@ -36,10 +36,18 @@ build-backend = "hatchling.build"
 only-include = ["app.py", "db.py", "face_store.py"]
 
 [tool.uv]
-# NOTE: do NOT add onnxruntime here — uv's override-dependencies replaces the
-# marker for a package across the whole resolution graph, which silently
-# prevents it from installing on platforms we actually want (e.g. linux/aarch64).
-# onnxruntime is a direct dep above with the correct marker.
+# openwakeword declares tflite-runtime as a hard dep on all ARM Linux
+# (armv7l + aarch64), but tflite-runtime only ships wheels for Python
+# 3.10 and 3.11. Narrow the marker so uv doesn't try to install it on
+# Python >=3.12 (where we use onnxruntime via openwakeword/vad.py).
+#
+# NOTE: do NOT add an override for onnxruntime here. uv's override-dependencies
+# replaces the marker on a package across the whole graph; narrowing it the
+# wrong direction silently excludes it from platforms we want
+# (e.g. linux/aarch64). onnxruntime is a direct dep above with the right marker.
+override-dependencies = [
+    "tflite-runtime>=2.14; python_version < '3.12' and sys_platform == 'linux'",
+]
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 
 
