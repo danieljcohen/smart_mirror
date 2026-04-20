@@ -3,7 +3,7 @@ import { getAllWidgets, getWidget } from "../widgets";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { type LayoutItem, getUser, loadLayout, saveLayout, loadDefaultLayout, saveDefaultLayout } from "../db/layout";
 import { getMirrorLocation, setMirrorLocation } from "../db/settings";
-import { saveWhoopCredentials } from "../db/whoop";
+import { saveWhoopCredentials, getWhoopCredentials } from "../db/whoop";
 import { AddressInput } from "./AddressInput";
 
 const WHOOP_AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth";
@@ -68,10 +68,30 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
           loadDefaultLayout(),
         ]);
         if (uid === null) { onLogout(); return; }
-        const remote = await loadLayout(uid, userName);
+        const [remote, whoopCreds] = await Promise.all([
+          loadLayout(uid, userName),
+          getWhoopCredentials(uid),
+        ]);
         if (!cancelled) {
           setUserId(uid);
-          setLayout(remote);
+          // Pre-populate client_id/client_secret in the WHOOP widget config from
+          // the whoop_credentials table so the user never has to re-enter them.
+          const hydratedLayout = whoopCreds
+            ? remote.map(item => {
+                if (item.widgetId !== "whoop") return item;
+                const cfg = item.config ?? {};
+                if (cfg.client_id && cfg.client_secret) return item;
+                return {
+                  ...item,
+                  config: {
+                    ...cfg,
+                    client_id:     cfg.client_id     || whoopCreds.client_id,
+                    client_secret: cfg.client_secret || whoopCreds.client_secret,
+                  },
+                };
+              })
+            : remote;
+          setLayout(hydratedLayout);
           setDefaultLayout(defLayout);
           setMirrorLocationState(loc);
         }
@@ -426,6 +446,9 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
                                 const uid = await getUser(userName);
                                 if (!uid) { alert("User not found — register your face first."); return; }
                                 await saveWhoopCredentials(uid, clientId, clientSecret);
+                                // Persist the layout (with client_id/client_secret in config) so
+                                // they are pre-populated on return without the user clicking Save.
+                                await saveLayout(uid, userName, layout);
                                 const redirectUri = window.location.origin + "/";
                                 const state = `${userName}::${Math.random().toString(36).slice(2).padEnd(8, "0")}`;
                                 const params = new URLSearchParams({
