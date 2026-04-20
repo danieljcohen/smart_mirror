@@ -2,8 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 const POLL_MS = 3_500;
 // Consecutive polls where the *primary* user is absent before releasing them.
-// 10 × 4s = 40 seconds.
-const MISS_THRESHOLD = 3;
+const MISS_THRESHOLD = 4;
 
 interface Face {
   name: string;
