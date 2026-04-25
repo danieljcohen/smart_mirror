@@ -11,7 +11,6 @@ try:
 except ImportError:
     Picamera2 = None
 
-# Global latest gesture
 LATEST_GESTURE = None
 _GESTURE_LOCK = threading.Lock()
 _LAST_REELS_HEARTBEAT_AT = 0.0
@@ -64,17 +63,11 @@ def mark_reels_active_heartbeat() -> None:
         _LAST_REELS_HEARTBEAT_AT = time.time()
 
 def gesture_monitor_loop(get_camera_func=None):
-    """
-    Background thread that polls camera frames and detects upward flick motion.
-    Uses frame differencing with NumPy (no MediaPipe dependency).
+    """Detect upward flicks via frame differencing.
 
-    When ``get_camera_func`` is provided (normal app startup), frames come from the
-    shared ``Camera`` in app.py: picamera2 on Raspberry Pi when available, OpenCV
-    elsewhere. Opening a second Picamera2 here would fail with buffer allocation
-    errors on the Pi.
-
-    If ``get_camera_func`` is omitted (e.g. manual testing), tries a standalone
-    Picamera2, then OpenCV VideoCapture.
+    With ``get_camera_func`` (normal startup), reuses app.py's shared Camera —
+    opening a second Picamera2 on the Pi fails with buffer allocation errors.
+    Without it, falls back to a standalone Picamera2 or OpenCV VideoCapture.
     """
     history: list[tuple[float, float]] = []
     HISTORY_MAX_AGE = 0.6

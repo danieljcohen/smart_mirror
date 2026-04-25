@@ -41,14 +41,11 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  // Mirror-wide location
   const [mirrorLocation, setMirrorLocationState] = useState("");
   const [locationSaving, setLocationSaving] = useState(false);
   const [locationMsg, setLocationMsg] = useState("");
 
-  // Which widget is open in the config panel
   const [configPanelId, setConfigPanelId] = useState<string | null>(null);
-  // Mirror settings modal
   const [mirrorSettingsOpen, setMirrorSettingsOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +53,6 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
   const dragModeRef = useRef<LayoutMode>("user");
   const dirtyRef = useRef(false);
 
-  // On mount: load user layout + default layout + mirror location
   useEffect(() => {
     let cancelled = false;
     async function init() {
@@ -74,8 +70,8 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
         ]);
         if (!cancelled) {
           setUserId(uid);
-          // Pre-populate client_id/client_secret in the WHOOP widget config from
-          // the whoop_credentials table so the user never has to re-enter them.
+          // Pre-populate Whoop client_id/client_secret from whoop_credentials
+          // so the user never has to re-enter them.
           const hydratedLayout = whoopCreds
             ? remote.map(item => {
                 if (item.widgetId !== "whoop") return item;
@@ -133,7 +129,6 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
         });
 
       if (d.mode === "drag" || d.mode === "resize") {
-        // Use the layout mode captured at drag-start time via dragModeRef
         if (dragModeRef.current === "default") {
           setDefaultLayout(updater);
         } else {
@@ -152,7 +147,6 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     };
   }, []);
 
-  // Helpers that operate on whichever layout is currently active
   const activeLayout    = layoutMode === "user" ? layout    : defaultLayout;
   const setActiveLayout = layoutMode === "user" ? setLayout : setDefaultLayout;
 
@@ -172,6 +166,35 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     },
     [activeLayout, layoutMode]
   );
+
+  const applyReelsmaxx = useCallback(() => {
+    const cols = 8;
+    const rows = 3;
+    const w = 100 / cols;
+    const h = 100 / rows;
+    const items: LayoutItem[] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        items.push({
+          widgetId: `reels#${r * cols + c}`,
+          x: +(c * w).toFixed(2),
+          y: +(r * h).toFixed(2),
+          w: +w.toFixed(2),
+          h: +h.toFixed(2),
+          config: { source_type: "trending", quality: "small" },
+        });
+      }
+    }
+    setActiveLayout(items);
+    setConfigPanelId(null);
+    dirtyRef.current = true;
+  }, [setActiveLayout]);
+
+  const clearLayout = useCallback(() => {
+    setActiveLayout([]);
+    setConfigPanelId(null);
+    dirtyRef.current = true;
+  }, [setActiveLayout]);
 
   const addWidget = useCallback((widgetId: string) => {
     setActiveLayout(prev => {
@@ -292,6 +315,21 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-500 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={clearLayout}
+              disabled={activeLayout.length === 0}
+              title="Remove every widget from this layout"
+              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 transition hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-700 disabled:hover:bg-transparent disabled:hover:text-zinc-300"
+            >
+              Clear Layout
+            </button>
+            <button
+              onClick={applyReelsmaxx}
+              title="Fill layout with Reels instances"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-200 transition hover:border-amber-400/70 hover:bg-amber-500/20 hover:text-amber-100"
+            >
+              ReelsMax
             </button>
             <button
               onClick={() => setMirrorSettingsOpen(true)}
@@ -446,8 +484,7 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
                                 const uid = await getUser(userName);
                                 if (!uid) { alert("User not found — register your face first."); return; }
                                 await saveWhoopCredentials(uid, clientId, clientSecret);
-                                // Persist the layout (with client_id/client_secret in config) so
-                                // they are pre-populated on return without the user clicking Save.
+                                // Persist so credentials are pre-populated on return without Save.
                                 await saveLayout(uid, userName, layout);
                                 const redirectUri = window.location.origin + "/";
                                 const state = `${userName}::${Math.random().toString(36).slice(2).padEnd(8, "0")}`;

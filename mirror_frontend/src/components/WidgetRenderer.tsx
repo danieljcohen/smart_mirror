@@ -6,7 +6,8 @@ interface WidgetRendererProps {
 }
 
 export function WidgetRenderer({ widgetId, config }: WidgetRendererProps) {
-  const def = getWidget(widgetId);
+  const baseId = widgetId.split("#")[0];
+  const def = getWidget(baseId);
   if (!def) {
     return (
       <div className="flex h-full items-center justify-center text-center text-sm font-semibold text-white/75">

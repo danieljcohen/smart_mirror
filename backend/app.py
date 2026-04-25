@@ -7,15 +7,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# When this file is run directly (``uv run app.py``) it is loaded as the
-# ``__main__`` module, but other files (e.g. jarvis.py) do ``from app import
-# get_camera``. Without this alias Python would load app.py a second time as
-# the separate ``app`` module, giving that copy its own uninitialized
-# ``camera`` global — so ``take_picture`` would try to construct a second
-# Picamera2 while the working one in ``__main__`` still owns the device,
-# which libcamera rejects with "Camera in Running state trying acquire()".
-# Aliasing the two module entries makes ``from app import X`` resolve to
-# this same, already-initialized module.
+# Alias __main__ → app so `from app import ...` elsewhere doesn't reload
+# this file and construct a second Picamera2 (libcamera rejects it).
 if __name__ == "__main__" and "app" not in sys.modules:
     sys.modules["app"] = sys.modules[__name__]
 
@@ -84,12 +77,9 @@ class Camera:
                         picam.configure(config)
                         picam.start()
                     except Exception:
-                        # Partially-initialized Picamera2 still holds the
-                        # libcamera device and leaves a zombie entry in
-                        # ``Picamera2.cameras`` that the internal listener
-                        # thread will keep dispatching to (surfacing as
-                        # "'Picamera2' object has no attribute 'allocator'"
-                        # in logs). Close it to drop the registration.
+                        # Close to drop the libcamera registration; a
+                        # partially-initialized Picamera2 leaves a zombie
+                        # entry the listener thread keeps dispatching to.
                         try:
                             picam.close()
                         except Exception:
@@ -603,10 +593,9 @@ def proxy_geocode():
         return jsonify({"status": "ERROR", "error": str(e)}), 502
 
 
-# Cache YouTube results for 6 hours to avoid burning through the free 10k unit/day quota
-# (each search costs 100 units, so without caching even 100 page loads exhausts it)
+# Cache search results — each YouTube search.list costs 100 quota units.
 _yt_cache: dict = {}
-_YT_CACHE_TTL = 6 * 60 * 60  # 6 hours in seconds
+_YT_CACHE_TTL = 6 * 60 * 60
 
 
 @app.get("/youtube/shorts")
@@ -644,17 +633,29 @@ def proxy_youtube_shorts():
     else:
         params["q"] = "#shorts"
 
+    # YouTube caps maxResults at 50 per page, so page twice for up to 100 results.
+    # Each search.list call costs 100 quota units — two pages = 200 units per fresh fetch.
     try:
-        resp = http_requests.get(
-            "https://www.googleapis.com/youtube/v3/search",
-            params=params,
-            timeout=10,
-        )
-        data = resp.json()
-        if "error" in data:
-            return jsonify({"status": "ERROR", "error": data["error"].get("message", "YouTube API error")}), 502
-        items = data.get("items", [])
-        video_ids = [i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId")]
+        video_ids: list[str] = []
+        page_token: str | None = None
+        for _ in range(2):
+            page_params = dict(params)
+            if page_token:
+                page_params["pageToken"] = page_token
+            resp = http_requests.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params=page_params,
+                timeout=10,
+            )
+            data = resp.json()
+            if "error" in data:
+                return jsonify({"status": "ERROR", "error": data["error"].get("message", "YouTube API error")}), 502
+            items = data.get("items", [])
+            video_ids.extend(i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId"))
+            page_token = data.get("nextPageToken")
+            if not page_token or len(video_ids) >= 100:
+                break
+        video_ids = video_ids[:100]
         _yt_cache[cache_key] = {"videoIds": video_ids, "ts": time.time()}
         return jsonify({"status": "OK", "videoIds": video_ids})
     except Exception as e:
@@ -664,7 +665,7 @@ def proxy_youtube_shorts():
 import xml.etree.ElementTree as ET
 
 _news_cache: dict = {}
-_NEWS_CACHE_TTL = 30 * 60  # 30 minutes
+_NEWS_CACHE_TTL = 30 * 60
 
 # Keywords that signal entertainment/celebrity/sports/lifestyle fluff
 _FLUFF_KEYWORDS = {
@@ -675,7 +676,7 @@ _FLUFF_KEYWORDS = {
     "hollywood", "box office", "album", "tour dates", "music video",
     "reality tv", "reality show", "bachelor", "dancing with the stars",
     "married at first", "love island", "big brother",
-    # Sports (unless you want this — remove if desired)
+    # Sports
     "nfl", "nba", "nhl", "mlb", "fifa", "premier league", "champions league",
     "super bowl", "world cup", "transfer fee", "transfer window",
     "touchdown", "home run", "slam dunk",
@@ -786,7 +787,7 @@ def proxy_sports_scores():
                 "homeScore": home.get("score", ""),
                 "awayScore": away.get("score", ""),
                 "status":    status_detail,
-                "state":     status_state,   # "pre" | "in" | "post"
+                "state":     status_state,
             })
 
         _sports_cache[league] = {"games": games, "ts": time.time()}

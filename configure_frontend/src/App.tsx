@@ -22,11 +22,10 @@ export default function App() {
 
     if (!code || !state) return;
 
-    // Parse userName from state (format: "userName::randomSuffix")
     const userName = state.split("::")[0];
     if (!userName) return;
 
-    // Clean the URL immediately so refreshing doesn't re-trigger
+    // Clean the URL so refreshing doesn't re-trigger the exchange.
     window.history.replaceState({}, "", window.location.pathname);
 
     (async () => {
