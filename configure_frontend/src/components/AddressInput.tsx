@@ -37,18 +37,16 @@ export function AddressInput({ value, onChange, placeholder, className }: Addres
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-  // Whether the current value was confirmed via a suggestion selection
+  // True once the value was picked from a suggestion (not just typed).
   const [confirmed, setConfirmed] = useState(!!value);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Keep input text in sync if parent resets the value
   useEffect(() => {
     setInputText(value);
     setConfirmed(!!value);
   }, [value]);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -62,7 +60,7 @@ export function AddressInput({ value, onChange, placeholder, className }: Addres
   const handleChange = (text: string) => {
     setInputText(text);
     setConfirmed(false);
-    onChange(text); // propagate raw text immediately so parent can save
+    onChange(text);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (text.length < 3) {

@@ -41,14 +41,11 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  // Mirror-wide location
   const [mirrorLocation, setMirrorLocationState] = useState("");
   const [locationSaving, setLocationSaving] = useState(false);
   const [locationMsg, setLocationMsg] = useState("");
 
-  // Which widget is open in the config panel
   const [configPanelId, setConfigPanelId] = useState<string | null>(null);
-  // Mirror settings modal
   const [mirrorSettingsOpen, setMirrorSettingsOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +53,6 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
   const dragModeRef = useRef<LayoutMode>("user");
   const dirtyRef = useRef(false);
 
-  // On mount: load user layout + default layout + mirror location
   useEffect(() => {
     let cancelled = false;
     async function init() {
@@ -74,8 +70,8 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
         ]);
         if (!cancelled) {
           setUserId(uid);
-          // Pre-populate client_id/client_secret in the WHOOP widget config from
-          // the whoop_credentials table so the user never has to re-enter them.
+          // Pre-populate Whoop client_id/client_secret from whoop_credentials
+          // so the user never has to re-enter them.
           const hydratedLayout = whoopCreds
             ? remote.map(item => {
                 if (item.widgetId !== "whoop") return item;
@@ -133,7 +129,6 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
         });
 
       if (d.mode === "drag" || d.mode === "resize") {
-        // Use the layout mode captured at drag-start time via dragModeRef
         if (dragModeRef.current === "default") {
           setDefaultLayout(updater);
         } else {
@@ -152,7 +147,6 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     };
   }, []);
 
-  // Helpers that operate on whichever layout is currently active
   const activeLayout    = layoutMode === "user" ? layout    : defaultLayout;
   const setActiveLayout = layoutMode === "user" ? setLayout : setDefaultLayout;
 
@@ -446,8 +440,7 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
                                 const uid = await getUser(userName);
                                 if (!uid) { alert("User not found — register your face first."); return; }
                                 await saveWhoopCredentials(uid, clientId, clientSecret);
-                                // Persist the layout (with client_id/client_secret in config) so
-                                // they are pre-populated on return without the user clicking Save.
+                                // Persist so credentials are pre-populated on return without Save.
                                 await saveLayout(uid, userName, layout);
                                 const redirectUri = window.location.origin + "/";
                                 const state = `${userName}::${Math.random().toString(36).slice(2).padEnd(8, "0")}`;

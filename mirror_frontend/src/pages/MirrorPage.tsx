@@ -70,10 +70,9 @@ export default function MirrorPage() {
       .catch(() => {});
   };
 
-  // Fetch on startup — grab the default layout immediately
   useEffect(() => { fetchDefaultLayout(); }, []);
 
-  // Fetch immediately when the recognized person changes
+  // Re-fetch when the recognized person changes.
   useEffect(() => {
     const primaryName = names[0];
     if (!primaryName) {
@@ -88,7 +87,6 @@ export default function MirrorPage() {
     fetchLayout(primaryName);
   }, [names]);
 
-  // Re-fetch every 10s
   useEffect(() => {
     const interval = setInterval(() => {
       const primaryName = namesRef.current[0];

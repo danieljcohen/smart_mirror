@@ -125,7 +125,7 @@ def _get_client() -> OpenAI:
 
 
 _weather_cache: dict = {"context": "", "location": "", "ts": 0.0}
-WEATHER_CACHE_TTL = 10 * 60  # refresh every 10 minutes
+WEATHER_CACHE_TTL = 10 * 60
 
 
 def _weather_label(code: int) -> str:
@@ -181,10 +181,8 @@ def _fetch_weather_context(location: str) -> str:
     return context
 
 
-# Patterns that cover how Grok variants (notably grok-3-mini) emit a tool
-# invocation as text instead of populating the structured `tool_calls` field.
-# Covers: bare name, call syntax, JSON object, XML-ish <tool_call>/<function>
-# wrappers, and fenced code blocks containing any of the above.
+# Fallback matchers — Grok variants (notably grok-3-mini) sometimes emit the
+# tool invocation as plain text instead of populating `tool_calls`.
 _TOOL_TEXT_PATTERNS: list[re.Pattern] = [
     re.compile(r"<\s*tool[_\- ]?call\s*>\s*.*?take_picture.*?<\s*/\s*tool[_\- ]?call\s*>", re.IGNORECASE | re.DOTALL),
     re.compile(r"<\s*function[^>]*>\s*.*?take_picture.*?<\s*/\s*function\s*>", re.IGNORECASE | re.DOTALL),
@@ -274,12 +272,8 @@ def jarvis_chat():
             for tc in tool_calls
         )
 
-        # Fallback: grok-3-mini (and occasionally other Grok variants) emit the
-        # tool invocation as text in ``content`` instead of populating the
-        # structured ``tool_calls`` field. Covers "take_picture",
-        # "take_picture()", JSON {"name":"take_picture"}, and <tool_call>…
-        # <function>… wrappers. Without this the raw string would leak into the
-        # chat UI, which is the "picture tool call is finicky" symptom.
+        # Fallback: promote a text-form tool call to a real invocation so the
+        # raw string doesn't leak into the chat UI.
         if not wants_picture and _looks_like_take_picture_call(raw_content):
             logger.info(
                 "Model emitted take_picture as text content; promoting to tool "
