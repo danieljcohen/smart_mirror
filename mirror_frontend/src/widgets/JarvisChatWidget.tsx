@@ -22,6 +22,40 @@ function stopSpeaking() {
     _ttsAudio.pause();
     _ttsAudio = null;
   }
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+/** Kiosk / Chromium often blocks <audio> without a user gesture; this usually still works. */
+function speakWithWebSpeech(
+  text: string,
+  onEnd: () => void,
+  onBoundary?: () => void,
+) {
+  if (!text.trim() || !window.speechSynthesis) {
+    onEnd();
+    return;
+  }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  let finished = false;
+  let boundaryIv: ReturnType<typeof setInterval> | null = null;
+  const done = (reason: string) => {
+    if (finished) return;
+    finished = true;
+    if (boundaryIv) clearInterval(boundaryIv);
+    console.log("[jarvis] Web Speech TTS done:", reason);
+    onEnd();
+  };
+  u.onend = () => done("ended");
+  u.onerror = (e) => { console.warn("[jarvis] Web Speech TTS error", e); done("error"); };
+
+  if (onBoundary) {
+    boundaryIv = setInterval(() => onBoundary(), 200);
+  }
+
+  window.speechSynthesis.speak(u);
 }
 
 function speak(
@@ -40,47 +74,105 @@ function speak(
   })
     .then((res) => {
       console.log("[jarvis] /api/tts status=", res.status);
-      if (!res.ok) throw new Error(`TTS request failed: ${res.status}`);
+      if (!res.ok) {
+        return res.text().then((body) => {
+          throw new Error(`TTS request failed: ${res.status} ${body.slice(0, 200)}`);
+        });
+      }
       return res.blob();
     })
     .then((blob) => {
       console.log("[jarvis] TTS blob size=", blob.size, "type=", blob.type);
+      if (!blob.size) {
+        console.warn("[jarvis] TTS empty body; using Web Speech fallback");
+        speakWithWebSpeech(text, () => onEnd?.(), onBoundary);
+        return;
+      }
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
+      const audio = new Audio();
+      audio.src = url;
+      audio.setAttribute("playsinline", "true");
       _ttsAudio = audio;
 
       let finished = false;
+      let boundaryIv: ReturnType<typeof setInterval> | null = null;
+      if (onBoundary) {
+        boundaryIv = setInterval(() => {
+          if (!_ttsAudio || audio.paused || audio.ended) {
+            if (boundaryIv) clearInterval(boundaryIv);
+            return;
+          }
+          onBoundary();
+        }, 200);
+      }
+
       const done = (reason: string) => {
         if (finished) return;
         finished = true;
-        if (iv) clearInterval(iv);
+        if (boundaryIv) clearInterval(boundaryIv);
         URL.revokeObjectURL(url);
         _ttsAudio = null;
         console.log("[jarvis] speak done:", reason);
         onEnd?.();
       };
 
-      audio.onended = () => done("ended");
-      audio.onerror = (e) => { console.warn("[jarvis] TTS playback error", e); done("error"); };
+      // Append so Chromium/Wayland treats this as a normal media node (some setups are picky).
+      audio.style.display = "none";
+      document.body.appendChild(audio);
 
-      let iv: ReturnType<typeof setInterval> | null = null;
-      if (onBoundary) {
-        iv = setInterval(() => {
-          if (!_ttsAudio || audio.paused || audio.ended) { if (iv) clearInterval(iv); return; }
-          onBoundary();
-        }, 200);
-      }
+      const cleanupNode = () => {
+        try {
+          audio.remove();
+        } catch {
+          /* ignore */
+        }
+      };
 
-      audio.play()
-        .then(() => console.log("[jarvis] audio.play() started"))
+      audio.onended = () => {
+        cleanupNode();
+        done("ended");
+      };
+      audio.onerror = (e) => {
+        cleanupNode();
+        console.warn("[jarvis] TTS playback error", e);
+        done("error");
+      };
+
+      audio
+        .play()
+        .then(() => {
+          console.log("[jarvis] audio.play() started");
+        })
         .catch((err) => {
-          console.warn("[jarvis] audio.play() rejected:", err?.name, err?.message);
-          done("play-rejected");
+          console.warn(
+            "[jarvis] audio.play() rejected, falling back to Web Speech API:",
+            err?.name,
+            err?.message,
+          );
+          cleanupNode();
+          URL.revokeObjectURL(url);
+          _ttsAudio = null;
+          if (boundaryIv) {
+            clearInterval(boundaryIv);
+            boundaryIv = null;
+          }
+          if (!finished) {
+            finished = true;
+            speakWithWebSpeech(
+              text,
+              () => onEnd?.(),
+              onBoundary,
+            );
+          }
         });
     })
     .catch((err) => {
       console.warn("[jarvis] speak() fetch failed:", err);
-      onEnd?.();
+      speakWithWebSpeech(
+        text,
+        () => onEnd?.(),
+        onBoundary,
+      );
     });
 }
 

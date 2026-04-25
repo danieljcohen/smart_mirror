@@ -36,4 +36,5 @@ exec "$CHROMIUM" \
   --password-store=basic \
   --disable-session-crashed-bubble \
   --disable-features=TranslateUI \
+  --autoplay-policy=no-user-gesture-required \
   http://localhost:5173
