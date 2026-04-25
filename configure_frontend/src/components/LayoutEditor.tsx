@@ -167,6 +167,35 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
     [activeLayout, layoutMode]
   );
 
+  const applyReelsmaxx = useCallback(() => {
+    const cols = 8;
+    const rows = 3;
+    const w = 100 / cols;
+    const h = 100 / rows;
+    const items: LayoutItem[] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        items.push({
+          widgetId: `reels#${r * cols + c}`,
+          x: +(c * w).toFixed(2),
+          y: +(r * h).toFixed(2),
+          w: +w.toFixed(2),
+          h: +h.toFixed(2),
+          config: { source_type: "trending", quality: "small" },
+        });
+      }
+    }
+    setActiveLayout(items);
+    setConfigPanelId(null);
+    dirtyRef.current = true;
+  }, [setActiveLayout]);
+
+  const clearLayout = useCallback(() => {
+    setActiveLayout([]);
+    setConfigPanelId(null);
+    dirtyRef.current = true;
+  }, [setActiveLayout]);
+
   const addWidget = useCallback((widgetId: string) => {
     setActiveLayout(prev => {
       if (prev.some(i => i.widgetId === widgetId)) return prev;
@@ -286,6 +315,21 @@ export function LayoutEditor({ userName, onLogout, onRegister }: LayoutEditorPro
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-500 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={clearLayout}
+              disabled={activeLayout.length === 0}
+              title="Remove every widget from this layout"
+              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 transition hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-700 disabled:hover:bg-transparent disabled:hover:text-zinc-300"
+            >
+              Clear Layout
+            </button>
+            <button
+              onClick={applyReelsmaxx}
+              title="Fill layout with Reels instances"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-200 transition hover:border-amber-400/70 hover:bg-amber-500/20 hover:text-amber-100"
+            >
+              ReelsMax
             </button>
             <button
               onClick={() => setMirrorSettingsOpen(true)}

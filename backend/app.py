@@ -633,17 +633,29 @@ def proxy_youtube_shorts():
     else:
         params["q"] = "#shorts"
 
+    # YouTube caps maxResults at 50 per page, so page twice for up to 100 results.
+    # Each search.list call costs 100 quota units — two pages = 200 units per fresh fetch.
     try:
-        resp = http_requests.get(
-            "https://www.googleapis.com/youtube/v3/search",
-            params=params,
-            timeout=10,
-        )
-        data = resp.json()
-        if "error" in data:
-            return jsonify({"status": "ERROR", "error": data["error"].get("message", "YouTube API error")}), 502
-        items = data.get("items", [])
-        video_ids = [i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId")]
+        video_ids: list[str] = []
+        page_token: str | None = None
+        for _ in range(2):
+            page_params = dict(params)
+            if page_token:
+                page_params["pageToken"] = page_token
+            resp = http_requests.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params=page_params,
+                timeout=10,
+            )
+            data = resp.json()
+            if "error" in data:
+                return jsonify({"status": "ERROR", "error": data["error"].get("message", "YouTube API error")}), 502
+            items = data.get("items", [])
+            video_ids.extend(i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId"))
+            page_token = data.get("nextPageToken")
+            if not page_token or len(video_ids) >= 100:
+                break
+        video_ids = video_ids[:100]
         _yt_cache[cache_key] = {"videoIds": video_ids, "ts": time.time()}
         return jsonify({"status": "OK", "videoIds": video_ids})
     except Exception as e:
