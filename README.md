@@ -1,17 +1,54 @@
 # Smart Mirror
 
-## Running the Backend
+A Raspberry Pi smart mirror with face recognition, gesture and speech input, configurable widgets, and a separate layout editor.
 
-### 1. Create venv and install packages
+## Apps
 
-On Mac:
+- `backend`: Flask API on `http://localhost:3000` for camera recognition, gestures, speech, layouts, widgets, and third-party API proxies.
+- `mirror_frontend`: Vite/React mirror display on `http://localhost:5173`; proxies `/api/*` to the backend.
+- `configure_frontend`: Vite/React layout editor on `http://localhost:5174`; proxies `/api/*` to the backend.
+- `modal_register`: Modal service for face registration and encoding.
+
+## Configuration
+
+Backend settings live in `backend/.env`:
+
+```bash
+SUPABASE_URL=...
+SUPABASE_KEY=...
+GOOGLE_MAPS_API_KEY=...   # optional, directions widget
+YOUTUBE_API_KEY=...       # optional, reels/search widgets
+DEEPGRAM_API_KEY=...      # optional, speech and text-to-speech
+XAI_API_KEY=...           # optional, Jarvis chat
+```
+
+Configure frontend settings live in `configure_frontend/.env`:
+
+```bash
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+VITE_MODAL_REGISTER_URL=...
+```
+
+Deploy face registration with:
+
+```bash
+modal deploy modal_register/register_service.py
+```
+
+The Modal registration service expects a Modal secret named `supabase` with `SUPABASE_URL` and `SUPABASE_KEY`.
+
+## Local Development
+
+Backend:
 
 ```bash
 cd backend
 uv sync
+uv run app.py
 ```
 
-On Raspberry Pi:
+On Raspberry Pi, install camera support first:
 
 ```bash
 sudo apt install -y python3-picamera2 libcap-dev
@@ -20,29 +57,7 @@ uv venv --system-site-packages --python 3.13
 uv sync
 ```
 
-### 2. Run the server
-
-```bash
-uv run app.py
-```
-
-Runs on port 3000 by default.
-
-### 3. Test it
-
-```bash
-# Single-frame recognition
-curl http://localhost:3000/recognize
-
-# Live video stream (open in browser)
-open http://localhost:3000/video_feed
-```
-
-## Mirror Frontend
-
-`mirror_frontend` (mirror UI, default `http://localhost:5173`) and `configure_frontend` (layout editor, `http://localhost:5174`) both use `yarn dev` and proxy `/api/*` to the backend on port 3000.
-
-`mirror_frontend` (mirror UI, default `http://localhost:5173`) and `configure_frontend` (layout editor, `http://localhost:5174`) both use `yarn dev` and proxy `/api/*` to the backend on port 3000.
+Mirror display:
 
 ```bash
 cd mirror_frontend
@@ -50,11 +65,7 @@ yarn install
 yarn dev
 ```
 
-Runs on `http://localhost:5173` and proxies `/api/*` to the backend on port 3000.
-
-- Intended to run on the Raspberry Pi and be the screen behind our mirror
-
-## Configure Frontend
+Layout editor:
 
 ```bash
 cd configure_frontend
@@ -62,37 +73,42 @@ yarn install
 yarn dev
 ```
 
-### Registering a New Person or Logging in
-
-If you have set up on this, log in, or else register.
-
-Face registration now runs as a Modal serverless function (`modal_register/register_service.py`) instead of the Pi backend — the Pi doesn't have the CPU to encode faces quickly. Deploy it with `modal deploy modal_register/register_service.py` and set `VITE_MODAL_REGISTER_URL` in `configure_frontend/.env` to the deployed endpoint URL.
-
-## Autostart on the Raspberry Pi
-
-`deploy/start.sh` pulls latest code, builds the frontend if anything changed, starts the backend and `vite preview`, then opens Chromium in kiosk mode.
-
-On Pi OS Bookworm (labwc / Wayland), wire it into the compositor's autostart so it inherits the full graphical session env. One-time setup on the Pi:
+Useful backend checks:
 
 ```bash
+curl http://localhost:3000/recognize
+open http://localhost:3000/video_feed
+```
+
+## Raspberry Pi Kiosk
+
+`deploy/start.sh` pulls the latest code, refreshes dependencies and rebuilds `mirror_frontend` when needed, starts the backend and `vite preview`, then opens Chromium in kiosk mode.
+
+Optional autostart setup for Pi OS Bookworm with labwc/Wayland. Adjust the path if the repo lives somewhere else:
+
+```bash
+mkdir -p ~/.config/labwc
 cat > ~/.config/labwc/autostart <<'EOF'
 /home/davis/Desktop/smart_mirror/deploy/start.sh &
 EOF
 chmod +x ~/.config/labwc/autostart
 ```
 
-Reboot. To exit the kiosk: `Alt+F4`, or from SSH `pkill -f chromium; pkill -f 'yarn preview'; pkill -f 'uv run'`.
-
-To run manually (useful for debugging):
+Run it manually for debugging:
 
 ```bash
 cd ~/Desktop/smart_mirror
 ./deploy/start.sh
 ```
 
+To exit kiosk mode, press `Alt+F4` or run:
+
+```bash
+pkill -f chromium; pkill -f 'yarn preview'; pkill -f 'uv run'
+```
+
 ## Authors
 
-- **Davis Featherstone** 
-- **Kethan Poduri**
-- **Daniel Cohen**
-
+- Davis Featherstone
+- Kethan Poduri
+- Daniel Cohen
